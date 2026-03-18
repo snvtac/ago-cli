@@ -24,14 +24,19 @@ It reads local history, shows a project picker, then opens the selected project 
 ## Install
 
 ```bash
-npm install
-npm link
+npm i -g ago-cli
 ```
 
-After linking, run with:
+Then run:
 
 ```bash
 ago
+```
+
+Or run without global install:
+
+```bash
+npx ago-cli
 ```
 
 ## Usage
@@ -56,10 +61,10 @@ ago
 ago -al
 
 # Fuzzy match in existing projects
-ago -n demo
+ago -n project
 
 # Fuzzy match in all records
-ago -al -n demo
+ago -al -n project
 ```
 
 ## Interactive Behavior

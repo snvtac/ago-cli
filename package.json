@@ -1,9 +1,38 @@
 {
   "name": "ago-cli",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "ago — AI Agent Dev Launcher",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/snvtac/ago-cli.git"
+  },
+  "type": "module",
   "bin": {
-    "ago": "bin/ago.js"
+    "ago": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "readme.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node -e \"const fs=require('node:fs');try{fs.chmodSync('dist/cli.js',0o755)}catch{}\"",
+    "test": "node --import tsx --test test/*.test.ts",
+    "prepare": "npm run build",
+    "prepack": "npm run build"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@inquirer/prompts": "^7.9.0",
+    "chalk": "^5.4.1",
+    "commander": "^12.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.9",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.2"
   },
   "license": "MIT"
 }

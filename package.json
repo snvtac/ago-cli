@@ -1,0 +1,9 @@
+{
+  "name": "ago-cli",
+  "version": "0.0.1",
+  "description": "ago — AI Agent Dev Launcher",
+  "bin": {
+    "ago": "bin/ago.js"
+  },
+  "license": "MIT"
+}

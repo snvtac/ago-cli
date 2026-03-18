@@ -23,17 +23,19 @@ It reads local history, shows a project picker, then opens the selected project 
 
 ## Install
 
+Global install (recommended):
+
 ```bash
 npm i -g ago-cli
 ```
 
-Then run:
+Run:
 
 ```bash
 ago
 ```
 
-Or run without global install:
+Without global install:
 
 ```bash
 npx ago-cli
@@ -146,5 +148,5 @@ npm run build
 - Only build artifacts are published.
 - Package publish files are restricted to:
   - `dist/`
-  - `readme.md`
+  - `README.md`
   - `LICENSE`

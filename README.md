@@ -1,7 +1,7 @@
 # ago-cli
 
 `ago-cli` is an interactive launcher for projects used in Codex and Claude.
-It reads local history, shows a project picker, then opens the selected project with `codex` or `claude`.
+It reads local history, resolves a project, then launches `codex` or `claude` in that project directory. With `-c`, it passes initial content directly to the selected CLI.
 
 ## Features
 
@@ -10,7 +10,7 @@ It reads local history, shows a project picker, then opens the selected project 
 - Fast fuzzy filtering with `-n <name>`.
 - Default mode only shows existing projects.
 - `-al` mode shows all records, including missing paths.
-- After selecting a project, always enter CLI choice (`codex` / `claude`) and show the project path.
+- After resolving a project, choose `codex` or `claude`, and optionally start it with initial content via `-c`.
 - Recommended CLI logic:
   - If both CLIs were used, recommend the most recently used one.
   - If only one CLI was used, recommend that one.
@@ -52,6 +52,7 @@ ago [options]
 - `-a, --all`: show all records (including missing paths).
 - `-al`: alias of `--all`.
 - `-n, --name <name>`: fuzzy match by project name/path/platform text.
+- `-c, --command <content>`: launch the selected CLI with initial content.
 
 ### Examples
 
@@ -67,6 +68,9 @@ ago -n project
 
 # Fuzzy match in all records
 ago -al -n project
+
+# Open the matched project and start codex/claude with initial content
+ago -n project_name -c "请帮我查询这个 repo"
 ```
 
 ## Interactive Behavior
@@ -81,7 +85,7 @@ Date format is `YY/MM/DD`.
 ### Name matching behavior
 
 - If `-n` matches exactly 1 project, skip project list and go directly to CLI selection.
-- If `-n` matches multiple projects, show filtered project list and let user pick one.
+- If `-n` matches multiple projects, show the filtered project list, let user pick one, then continue to CLI selection.
 - If no match, print a message and exit.
 
 ### CLI selection behavior
@@ -90,6 +94,7 @@ Date format is `YY/MM/DD`.
 - Choices are fixed: `codex` and `claude`.
 - Shows selected project path in the prompt.
 - Includes a `Back to project list` option.
+- When `-c` is provided, `ago` launches either `codex "<content>"` or `claude "<content>"` in the selected project directory.
 
 ## Data Sources
 

@@ -2,7 +2,13 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
 
-import { filterProjectsByNameQuery, getRecommendedTool, normalizeArgv } from "../src/index.js";
+import {
+  buildLaunchArgs,
+  filterProjectsByNameQuery,
+  getRecommendedTool,
+  normalizeArgv,
+  parseCommandPromptOption,
+} from "../src/index.js";
 import { TOOL_CODEX, TOOL_CLAUDE } from "../src/project-index.js";
 
 test("normalizeArgv maps -al to --all", () => {
@@ -13,6 +19,11 @@ test("normalizeArgv maps -al to --all", () => {
 test("normalizeArgv keeps -n and still maps -al", () => {
   const argv = ["node", "dist/cli.js", "-al", "-n", "sample"];
   assert.deepEqual(normalizeArgv(argv), ["node", "dist/cli.js", "--all", "-n", "sample"]);
+});
+
+test("normalizeArgv keeps -c and still maps -al", () => {
+  const argv = ["node", "dist/cli.js", "-al", "-n", "sample", "-c", "inspect repo"];
+  assert.deepEqual(normalizeArgv(argv), ["node", "dist/cli.js", "--all", "-n", "sample", "-c", "inspect repo"]);
 });
 
 test("filterProjectsByNameQuery fuzzy matches name and path", () => {
@@ -114,4 +125,28 @@ test("getRecommendedTool prefers single observed tool when only one exists", () 
 
   assert.equal(codexOnly, TOOL_CODEX);
   assert.equal(claudeOnly, TOOL_CLAUDE);
+});
+
+test("parseCommandPromptOption returns empty string when option is omitted", () => {
+  assert.equal(parseCommandPromptOption(undefined), "");
+});
+
+test("parseCommandPromptOption trims valid content", () => {
+  assert.equal(parseCommandPromptOption("  inspect repo  "), "inspect repo");
+});
+
+test("parseCommandPromptOption rejects whitespace-only content", () => {
+  assert.throws(() => parseCommandPromptOption("   "), /non-empty content/i);
+});
+
+test("buildLaunchArgs returns empty args when no command content is provided", () => {
+  assert.deepEqual(buildLaunchArgs(TOOL_CODEX, ""), []);
+});
+
+test("buildLaunchArgs passes initial content to codex", () => {
+  assert.deepEqual(buildLaunchArgs(TOOL_CODEX, "inspect repo"), ["inspect repo"]);
+});
+
+test("buildLaunchArgs passes initial content to claude", () => {
+  assert.deepEqual(buildLaunchArgs(TOOL_CLAUDE, "inspect repo"), ["inspect repo"]);
 });

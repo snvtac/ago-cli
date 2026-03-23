@@ -23,11 +23,13 @@ type ToolName = typeof TOOL_CODEX | typeof TOOL_CLAUDE;
 interface CliOptions {
   all?: boolean;
   name?: string;
+  command?: string;
 }
 
 interface RunInteractiveOptions {
   showAll: boolean;
   nameQuery: string;
+  commandPrompt: string;
 }
 
 interface ProjectChoice {
@@ -429,9 +431,38 @@ export function normalizeArgv(argv: string[] = process.argv): string[] {
   return argv.map((arg) => (arg === "-al" ? "--all" : arg));
 }
 
-async function spawnInteractiveCommand(command: string, cwd: string): Promise<{ code: number | null; signal: NodeJS.Signals | null }> {
+export function parseCommandPromptOption(input: unknown): string {
+  if (typeof input !== "string") {
+    return "";
+  }
+
+  const normalized = input.trim();
+  if (!normalized) {
+    throw new Error("Option -c, --command requires non-empty content.");
+  }
+
+  return normalized;
+}
+
+export function buildLaunchArgs(tool: ToolName, commandPrompt: string): string[] {
+  if (!commandPrompt) {
+    return [];
+  }
+
+  switch (tool) {
+    case TOOL_CODEX:
+    case TOOL_CLAUDE:
+      return [commandPrompt];
+  }
+}
+
+async function spawnInteractiveCommand(
+  command: string,
+  args: string[],
+  cwd: string
+): Promise<{ code: number | null; signal: NodeJS.Signals | null }> {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, [], {
+    const child = spawn(command, args, {
       cwd,
       stdio: "inherit",
       env: process.env,
@@ -527,7 +558,7 @@ export async function runInteractive(options: RunInteractiveOptions): Promise<vo
 
     console.log(chalk.dim(`Launching ${selectedTool} in ${project.path}`));
 
-    const result = await spawnInteractiveCommand(command, project.path);
+    const result = await spawnInteractiveCommand(command, buildLaunchArgs(selectedTool, options.commandPrompt), project.path);
 
     if (typeof result.code === "number" && result.code !== 0) {
       console.error(chalk.yellow(`${command} exited with code ${result.code}.`));
@@ -549,6 +580,7 @@ export async function main(argv: string[] = process.argv): Promise<void> {
     .description("Open projects from Codex and Claude history")
     .option("-a, --all", "Show all records (including missing projects)")
     .option("-n, --name <name>", "Fuzzy-match projects by name/path")
+    .option("-c, --command <content>", "Launch selected CLI with initial content")
     .allowExcessArguments(false)
     .showHelpAfterError();
 
@@ -556,6 +588,7 @@ export async function main(argv: string[] = process.argv): Promise<void> {
     await runInteractive({
       showAll: Boolean(options.all),
       nameQuery: normalizeQuery(options.name || ""),
+      commandPrompt: parseCommandPromptOption(options.command),
     });
   });
 

@@ -8,6 +8,7 @@ import {
   TOOL_CLAUDE,
   TOOL_CODEX,
   collectClaudeFromTranscripts,
+  collectClaudeObservations,
   filterProjectsByRoots,
   frecencyWeight,
   mergeProjectObservations,
@@ -278,5 +279,45 @@ test("collectClaudeFromTranscripts reads cwd from the newest transcript per dir"
     assert.equal(observations[0]?.path, path.resolve("/tmp/proj"));
     assert.equal(observations[0]?.tool, TOOL_CLAUDE);
     assert.equal(observations[0]?.sessionId, "newer");
+  });
+});
+
+test("collectClaudeObservations merges history + transcripts without double counting", async () => {
+  await withTempDir(async (home) => {
+    const claudeDir = path.join(home, ".claude");
+    await fs.mkdir(claudeDir, { recursive: true });
+
+    // history.jsonl has session s1 in /tmp/p1
+    await fs.writeFile(
+      path.join(claudeDir, "history.jsonl"),
+      `${JSON.stringify({ project: "/tmp/p1", timestamp: "1700000000000", sessionId: "s1" })}\n`,
+      "utf8"
+    );
+
+    // transcript dir for /tmp/p1 repeats s1 (must be deduped)
+    const d1 = path.join(claudeDir, "projects", "-tmp-p1");
+    await fs.mkdir(d1, { recursive: true });
+    await fs.writeFile(
+      path.join(d1, "s1.jsonl"),
+      `${JSON.stringify({ type: "user", cwd: "/tmp/p1", sessionId: "s1", timestamp: "2026-01-01T00:00:00.000Z" })}\n`,
+      "utf8"
+    );
+
+    // transcript dir for /tmp/p2 introduces a new session s2 (must be covered)
+    const d2 = path.join(claudeDir, "projects", "-tmp-p2");
+    await fs.mkdir(d2, { recursive: true });
+    await fs.writeFile(
+      path.join(d2, "s2.jsonl"),
+      `${JSON.stringify({ type: "user", cwd: "/tmp/p2", sessionId: "s2", timestamp: "2026-01-01T00:00:00.000Z" })}\n`,
+      "utf8"
+    );
+
+    const observations = await collectClaudeObservations(home);
+
+    assert.deepEqual(observations.map((obs) => obs.sessionId).sort(), ["s1", "s2"]);
+    assert.deepEqual(
+      [...new Set(observations.map((obs) => obs.path))].sort(),
+      [path.resolve("/tmp/p1"), path.resolve("/tmp/p2")]
+    );
   });
 });

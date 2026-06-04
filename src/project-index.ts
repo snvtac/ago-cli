@@ -505,7 +505,7 @@ export async function collectClaudeFromTranscripts(homeDir = os.homedir()): Prom
   return observations;
 }
 
-export async function collectClaudeObservations(homeDir = os.homedir()): Promise<ProjectObservation[]> {
+export async function collectClaudeFromSessionsIndex(homeDir = os.homedir()): Promise<ProjectObservation[]> {
   const projectsDir = path.join(homeDir, ".claude", "projects");
 
   if (!fs.existsSync(projectsDir)) {
@@ -536,6 +536,50 @@ export async function collectClaudeObservations(homeDir = os.homedir()): Promise
   }
 
   return observations;
+}
+
+export async function collectClaudeObservations(homeDir = os.homedir()): Promise<ProjectObservation[]> {
+  const historyPath = path.join(homeDir, ".claude", "history.jsonl");
+
+  const [fromHistory, fromTranscripts, fromLegacy] = await Promise.all([
+    parseClaudeHistoryFile(historyPath),
+    collectClaudeFromTranscripts(homeDir),
+    collectClaudeFromSessionsIndex(homeDir),
+  ]);
+
+  const seenSessionIds = new Set<string>();
+  const seenPaths = new Set<string>();
+  const result: ProjectObservation[] = [];
+
+  const addSessioned = (observations: ProjectObservation[]): void => {
+    for (const observation of observations) {
+      if (!observation.sessionId) {
+        continue;
+      }
+      if (seenSessionIds.has(observation.sessionId)) {
+        continue;
+      }
+      seenSessionIds.add(observation.sessionId);
+      seenPaths.add(observation.path);
+      result.push(observation);
+    }
+  };
+
+  const addPathOnly = (observations: ProjectObservation[]): void => {
+    for (const observation of observations) {
+      if (seenPaths.has(observation.path)) {
+        continue;
+      }
+      seenPaths.add(observation.path);
+      result.push(observation);
+    }
+  };
+
+  addSessioned(fromHistory);
+  addSessioned(fromTranscripts);
+  addPathOnly(fromLegacy);
+
+  return result;
 }
 
 export function frecencyWeight(ageMs: number): number {

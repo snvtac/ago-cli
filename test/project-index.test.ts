@@ -8,6 +8,7 @@ import {
   TOOL_CLAUDE,
   TOOL_CODEX,
   filterProjectsByRoots,
+  frecencyWeight,
   mergeProjectObservations,
   parseClaudeSessionsIndexFile,
   parseCodexSessionFile,
@@ -169,4 +170,42 @@ test("toEpochMs upgrades epoch-second strings to milliseconds", () => {
 
 test("toEpochMs still parses ISO date strings", () => {
   assert.equal(toEpochMs("2026-03-18T12:00:00.000Z"), Date.parse("2026-03-18T12:00:00.000Z"));
+});
+
+test("frecencyWeight buckets by age", () => {
+  const hour = 3600_000;
+  assert.equal(frecencyWeight(0), 4);
+  assert.equal(frecencyWeight(2 * hour), 2);
+  assert.equal(frecencyWeight(3 * 24 * hour), 0.5);
+  assert.equal(frecencyWeight(30 * 24 * hour), 0.25);
+});
+
+test("mergeProjectObservations ranks frequent projects above a single recent one", () => {
+  const now = 1_000_000_000_000;
+  const hour = 3600_000;
+
+  const observations = [
+    { path: "/recent-once", tool: TOOL_CODEX, lastSeenAt: now - hour / 2 }, // weight 4
+  ];
+  for (let i = 0; i < 12; i += 1) {
+    observations.push({ path: "/frequent", tool: TOOL_CODEX, lastSeenAt: now - 3 * 24 * hour }); // 12 * 0.5 = 6
+  }
+
+  const merged = mergeProjectObservations(observations, now);
+  assert.equal(merged[0]?.path, path.resolve("/frequent"));
+  assert.equal(merged[1]?.path, path.resolve("/recent-once"));
+});
+
+test("mergeProjectObservations records the newest sessionId per tool", () => {
+  const merged = mergeProjectObservations(
+    [
+      { path: "/x", tool: TOOL_CODEX, lastSeenAt: 100, sessionId: "codex-old" },
+      { path: "/x", tool: TOOL_CODEX, lastSeenAt: 300, sessionId: "codex-new" },
+      { path: "/x", tool: TOOL_CLAUDE, lastSeenAt: 200, sessionId: "claude-1" },
+    ],
+    400
+  );
+
+  assert.equal(merged[0]?.lastSessionIdByTool.codex, "codex-new");
+  assert.equal(merged[0]?.lastSessionIdByTool.claude, "claude-1");
 });

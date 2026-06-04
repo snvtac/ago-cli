@@ -40,6 +40,11 @@ export interface ProjectIndexItem {
   };
   lastSeenAt: number;
   exists: boolean;
+  frecencyScore: number;
+  lastSessionIdByTool: {
+    codex?: string;
+    claude?: string;
+  };
 }
 
 export const DEFAULT_CONFIG: Readonly<AgoConfig> = Object.freeze({
@@ -349,14 +354,36 @@ export async function collectClaudeObservations(homeDir = os.homedir()): Promise
   return observations;
 }
 
+export function frecencyWeight(ageMs: number): number {
+  const HOUR = 3600_000;
+  const DAY = 24 * HOUR;
+  const WEEK = 7 * DAY;
+
+  if (ageMs <= HOUR) {
+    return 4;
+  }
+  if (ageMs <= DAY) {
+    return 2;
+  }
+  if (ageMs <= WEEK) {
+    return 0.5;
+  }
+  return 0.25;
+}
+
 interface MergedMapItem {
   path: string;
   name: string;
   sources: Set<ToolName>;
   lastSeenAtByTool: Partial<Record<ToolName, number>>;
+  frecencyScore: number;
+  lastSessionIdByTool: Partial<Record<ToolName, string>>;
 }
 
-export function mergeProjectObservations(observations: ProjectObservation[]): ProjectIndexItem[] {
+export function mergeProjectObservations(
+  observations: ProjectObservation[],
+  now: number = Date.now()
+): ProjectIndexItem[] {
   const map = new Map<string, MergedMapItem>();
 
   for (const observation of observations) {
@@ -368,24 +395,28 @@ export function mergeProjectObservations(observations: ProjectObservation[]): Pr
     }
 
     const lastSeenAt = Math.max(0, toEpochMs(observation?.lastSeenAt));
-    const existing = map.get(normalizedPath);
+    const sessionId = typeof observation?.sessionId === "string" ? observation.sessionId : undefined;
+    let existing = map.get(normalizedPath);
 
     if (!existing) {
-      map.set(normalizedPath, {
+      existing = {
         path: normalizedPath,
         name: path.basename(normalizedPath) || normalizedPath,
-        sources: new Set([tool]),
-        lastSeenAtByTool: {
-          [tool]: lastSeenAt,
-        },
-      });
-      continue;
+        sources: new Set<ToolName>(),
+        lastSeenAtByTool: {},
+        frecencyScore: 0,
+        lastSessionIdByTool: {},
+      };
+      map.set(normalizedPath, existing);
     }
 
     existing.sources.add(tool);
+    existing.frecencyScore += frecencyWeight(now - lastSeenAt);
+
     const previousLastSeenAt = existing.lastSeenAtByTool[tool] || 0;
-    if (lastSeenAt > previousLastSeenAt) {
+    if (lastSeenAt >= previousLastSeenAt) {
       existing.lastSeenAtByTool[tool] = lastSeenAt;
+      existing.lastSessionIdByTool[tool] = sessionId;
     }
   }
 
@@ -408,13 +439,20 @@ export function mergeProjectObservations(observations: ProjectObservation[]): Pr
         },
         lastSeenAt: Math.max(codexLastSeenAt, claudeLastSeenAt),
         exists: fs.existsSync(item.path),
+        frecencyScore: item.frecencyScore,
+        lastSessionIdByTool: {
+          codex: item.lastSessionIdByTool[TOOL_CODEX],
+          claude: item.lastSessionIdByTool[TOOL_CLAUDE],
+        },
       };
     })
     .sort((left, right) => {
+      if (right.frecencyScore !== left.frecencyScore) {
+        return right.frecencyScore - left.frecencyScore;
+      }
       if (right.lastSeenAt !== left.lastSeenAt) {
         return right.lastSeenAt - left.lastSeenAt;
       }
-
       return left.path.localeCompare(right.path);
     });
 }

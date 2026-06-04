@@ -24,6 +24,7 @@ interface CliOptions {
   all?: boolean;
   name?: string;
   command?: string;
+  last?: boolean;
 }
 
 interface RunInteractiveOptions {
@@ -644,6 +645,46 @@ export async function runInteractive(options: RunInteractiveOptions): Promise<vo
   }
 }
 
+export async function runLastLaunch(options: { commandPrompt: string }): Promise<void> {
+  const { chalk } = await loadUiDependencies();
+
+  const statePath = getDefaultStatePath();
+  const config = await loadConfig(getDefaultConfigPath());
+  const state = await loadState(statePath);
+  const last = state.lastLaunch;
+
+  const fallback = async (reason: string): Promise<void> => {
+    console.log(chalk.yellow(`${reason} Falling back to project list.`));
+    await runInteractive({ showAll: false, nameQuery: "", commandPrompt: options.commandPrompt });
+  };
+
+  if (!last) {
+    await fallback("No previous launch recorded.");
+    return;
+  }
+
+  const command = resolveCommand(last.tool, config);
+  if (!isCommandAvailable(command)) {
+    await fallback(`Command not found: ${command}.`);
+    return;
+  }
+
+  if (!fs.existsSync(last.path)) {
+    await fallback(`Last project path not found: ${last.path}.`);
+    return;
+  }
+
+  await performLaunch({
+    tool: last.tool,
+    command,
+    cwd: last.path,
+    args: buildLaunchArgs(last.tool, options.commandPrompt),
+    state,
+    statePath,
+    chalk,
+  });
+}
+
 export async function main(argv: string[] = process.argv): Promise<void> {
   const program = new Command();
 
@@ -653,14 +694,22 @@ export async function main(argv: string[] = process.argv): Promise<void> {
     .option("-a, --all", "Show all records (including missing projects)")
     .option("-n, --name <name>", "Fuzzy-match projects by name/path")
     .option("-c, --command <content>", "Launch selected CLI with initial content")
+    .option("-l, --last", "Reopen the last launched project and CLI")
     .allowExcessArguments(false)
     .showHelpAfterError();
 
   program.action(async (options: CliOptions) => {
+    const commandPrompt = parseCommandPromptOption(options.command);
+
+    if (options.last) {
+      await runLastLaunch({ commandPrompt });
+      return;
+    }
+
     await runInteractive({
       showAll: Boolean(options.all),
       nameQuery: normalizeQuery(options.name || ""),
-      commandPrompt: parseCommandPromptOption(options.command),
+      commandPrompt,
     });
   });
 

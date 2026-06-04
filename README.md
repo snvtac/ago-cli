@@ -14,6 +14,9 @@ It reads local history, resolves a project, then launches `codex` or `claude` in
 - Recommended CLI logic:
   - If both CLIs were used, recommend the most recently used one.
   - If only one CLI was used, recommend that one.
+- Projects are ranked by frecency (frequency × recency), so daily projects stay on top.
+- `ago -` (or `ago --last`) instantly reopens the last launched project + CLI.
+- For tools with a recorded session, the CLI menu offers "continue last session" (resumes the exact session id).
 
 ## Tech Stack
 
@@ -53,6 +56,7 @@ ago [options]
 - `-al`: alias of `--all`.
 - `-n, --name <name>`: fuzzy match by project name/path/platform text.
 - `-c, --command <content>`: launch the selected CLI with initial content.
+- `-l, --last`: reopen the last launched project + CLI (alias: bare `ago -`).
 
 ### Examples
 
@@ -100,8 +104,10 @@ Date format is `YY/MM/DD`.
 
 - Codex: `~/.codex/sessions/**/*.jsonl`
   - Reads first line (`session_meta`) and extracts `payload.cwd` plus timestamp.
-- Claude: `~/.claude/projects/*/sessions-index.json`
-  - Extracts `entries[].projectPath` plus `modified` / `fileMtime`.
+- Claude (in priority order, deduplicated by session id):
+  - `~/.claude/history.jsonl` — entries provide `project`, `timestamp`, `sessionId`.
+  - `~/.claude/projects/<encoded-path>/<session-uuid>.jsonl` — the newest transcript per project dir supplies the true `cwd` (paths are never decoded from the directory name).
+  - `~/.claude/projects/*/sessions-index.json` — legacy fallback for older Claude versions.
 
 ## Config and State
 
@@ -129,9 +135,16 @@ Date format is `YY/MM/DD`.
 {
   "lastLaunchedByPath": {
     "/absolute/project/path": "codex"
+  },
+  "lastLaunch": {
+    "path": "/absolute/project/path",
+    "tool": "codex",
+    "ts": 1780554836375
   }
 }
 ```
+
+`lastLaunch` records the most recent launch and powers `ago -` / `ago --last`.
 
 This stores the last CLI used per project path.
 

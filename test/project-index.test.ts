@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 import {
   TOOL_CLAUDE,
   TOOL_CODEX,
+  collectClaudeFromTranscripts,
   filterProjectsByRoots,
   frecencyWeight,
   mergeProjectObservations,
@@ -245,5 +246,37 @@ test("parseClaudeHistoryFile groups prompts by sessionId and keeps the latest ti
     assert.equal(s1?.path, path.resolve("/tmp/p1"));
     assert.equal(s1?.tool, TOOL_CLAUDE);
     assert.equal(s1?.lastSeenAt, 1700000005000);
+  });
+});
+
+test("collectClaudeFromTranscripts reads cwd from the newest transcript per dir", async () => {
+  await withTempDir(async (home) => {
+    const dir = path.join(home, ".claude", "projects", "-tmp-proj");
+    await fs.mkdir(dir, { recursive: true });
+
+    const olderFile = path.join(dir, "older.jsonl");
+    await fs.writeFile(
+      olderFile,
+      `${JSON.stringify({ type: "user", cwd: "/tmp/proj", sessionId: "older", timestamp: "2026-01-01T00:00:00.000Z" })}\n`,
+      "utf8"
+    );
+
+    const newerFile = path.join(dir, "newer.jsonl");
+    const newerContent = [
+      JSON.stringify({ type: "file-history-snapshot" }),
+      JSON.stringify({ type: "permission-mode" }),
+      JSON.stringify({ type: "user", cwd: "/tmp/proj", sessionId: "newer", timestamp: "2026-02-01T00:00:00.000Z" }),
+    ].join("\n");
+    await fs.writeFile(newerFile, `${newerContent}\n`, "utf8");
+
+    const future = new Date(Date.now() + 60_000);
+    await fs.utimes(newerFile, future, future);
+
+    const observations = await collectClaudeFromTranscripts(home);
+
+    assert.equal(observations.length, 1);
+    assert.equal(observations[0]?.path, path.resolve("/tmp/proj"));
+    assert.equal(observations[0]?.tool, TOOL_CLAUDE);
+    assert.equal(observations[0]?.sessionId, "newer");
   });
 });

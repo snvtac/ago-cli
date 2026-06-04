@@ -368,6 +368,143 @@ export async function parseClaudeHistoryFile(filePath: string): Promise<ProjectO
   return [...bySession.values()];
 }
 
+async function readLeadingLines(filePath: string, maxLines: number): Promise<string[]> {
+  return new Promise((resolve) => {
+    const lines: string[] = [];
+    let buffer = "";
+    let done = false;
+
+    const finish = (): void => {
+      if (!done) {
+        done = true;
+        resolve(lines);
+      }
+    };
+
+    const stream = fs.createReadStream(filePath, { encoding: "utf8", highWaterMark: 64 * 1024 });
+    stream.on("error", finish);
+
+    stream.on("data", (chunk) => {
+      buffer += chunk;
+      let newlineIndex = buffer.indexOf("\n");
+      while (newlineIndex !== -1) {
+        lines.push(buffer.slice(0, newlineIndex).replace(/\r$/, ""));
+        buffer = buffer.slice(newlineIndex + 1);
+        if (lines.length >= maxLines) {
+          stream.destroy();
+          finish();
+          return;
+        }
+        newlineIndex = buffer.indexOf("\n");
+      }
+    });
+
+    stream.on("end", () => {
+      if (buffer) {
+        lines.push(buffer.replace(/\r$/, ""));
+      }
+      finish();
+    });
+  });
+}
+
+export async function parseClaudeTranscriptFile(filePath: string): Promise<ProjectObservation | null> {
+  const lines = await readLeadingLines(filePath, 50);
+
+  let mtime = 0;
+  try {
+    mtime = (await fsp.stat(filePath)).mtimeMs;
+  } catch {
+    mtime = 0;
+  }
+
+  for (const line of lines) {
+    if (!line) {
+      continue;
+    }
+
+    let json: RawJson;
+    try {
+      json = JSON.parse(line) as RawJson;
+    } catch {
+      continue;
+    }
+
+    const cwd = normalizeProjectPath(json.cwd);
+    if (!cwd) {
+      continue;
+    }
+
+    const sessionId = typeof json.sessionId === "string" ? json.sessionId : undefined;
+    return {
+      path: cwd,
+      tool: TOOL_CLAUDE,
+      lastSeenAt: mtime || toEpochMs(json.timestamp),
+      sessionId,
+    };
+  }
+
+  return null;
+}
+
+export async function collectClaudeFromTranscripts(homeDir = os.homedir()): Promise<ProjectObservation[]> {
+  const projectsDir = path.join(homeDir, ".claude", "projects");
+  if (!fs.existsSync(projectsDir)) {
+    return [];
+  }
+
+  let dirEntries: fs.Dirent[] = [];
+  try {
+    dirEntries = await fsp.readdir(projectsDir, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+
+  const observations: ProjectObservation[] = [];
+
+  for (const dirEntry of dirEntries) {
+    if (!dirEntry.isDirectory()) {
+      continue;
+    }
+
+    const dirPath = path.join(projectsDir, dirEntry.name);
+    let fileEntries: fs.Dirent[] = [];
+    try {
+      fileEntries = await fsp.readdir(dirPath, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+
+    let newest: { path: string; mtime: number } | null = null;
+    for (const fileEntry of fileEntries) {
+      if (!fileEntry.isFile() || !fileEntry.name.endsWith(".jsonl")) {
+        continue;
+      }
+      const fullPath = path.join(dirPath, fileEntry.name);
+      let mtime = 0;
+      try {
+        mtime = (await fsp.stat(fullPath)).mtimeMs;
+      } catch {
+        continue;
+      }
+      if (!newest || mtime > newest.mtime) {
+        newest = { path: fullPath, mtime };
+      }
+    }
+
+    if (!newest) {
+      continue;
+    }
+
+    const observation = await parseClaudeTranscriptFile(newest.path);
+    if (observation) {
+      observations.push(observation);
+    }
+  }
+
+  return observations;
+}
+
 export async function collectClaudeObservations(homeDir = os.homedir()): Promise<ProjectObservation[]> {
   const projectsDir = path.join(homeDir, ".claude", "projects");
 

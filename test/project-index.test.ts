@@ -12,6 +12,7 @@ import {
   filterProjectsByRoots,
   frecencyWeight,
   mergeProjectObservations,
+  normalizeState,
   parseClaudeHistoryFile,
   parseClaudeSessionsIndexFile,
   parseCodexSessionFile,
@@ -320,4 +321,25 @@ test("collectClaudeObservations merges history + transcripts without double coun
       [path.resolve("/tmp/p1"), path.resolve("/tmp/p2")]
     );
   });
+});
+
+test("normalizeState keeps a valid lastLaunch", () => {
+  const state = normalizeState({
+    lastLaunchedByPath: {},
+    lastLaunch: { path: "/tmp/proj", tool: "codex", ts: 123 },
+  });
+  assert.equal(state.lastLaunch?.path, path.resolve("/tmp/proj"));
+  assert.equal(state.lastLaunch?.tool, "codex");
+  assert.equal(state.lastLaunch?.ts, 123);
+});
+
+test("normalizeState drops an invalid lastLaunch", () => {
+  const state = normalizeState({ lastLaunchedByPath: {}, lastLaunch: { path: "/tmp/proj", tool: "bogus" } });
+  assert.equal(state.lastLaunch, undefined);
+});
+
+test("normalizeState keeps lastLaunch even when lastLaunchedByPath is absent", () => {
+  const state = normalizeState({ lastLaunch: { path: "/tmp/proj", tool: "codex", ts: 5 } });
+  assert.equal(state.lastLaunch?.path, path.resolve("/tmp/proj"));
+  assert.equal(state.lastLaunch?.tool, "codex");
 });

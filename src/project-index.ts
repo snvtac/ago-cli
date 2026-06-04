@@ -20,6 +20,11 @@ export interface AgoConfig {
 
 export interface AgoState {
   lastLaunchedByPath: Record<string, ToolName>;
+  lastLaunch?: {
+    path: string;
+    tool: ToolName;
+    ts: number;
+  };
 }
 
 export interface ProjectObservation {
@@ -740,18 +745,30 @@ export function normalizeState(rawState: RawJson = {}): AgoState {
   };
 
   const sourceMap = rawState?.lastLaunchedByPath;
-  if (!sourceMap || typeof sourceMap !== "object" || Array.isArray(sourceMap)) {
-    return out;
+  if (sourceMap && typeof sourceMap === "object" && !Array.isArray(sourceMap)) {
+    for (const [projectPath, tool] of Object.entries(sourceMap as Record<string, unknown>)) {
+      const normalizedPath = normalizeProjectPath(projectPath);
+      if (!normalizedPath) {
+        continue;
+      }
+
+      if (tool === TOOL_CODEX || tool === TOOL_CLAUDE) {
+        out.lastLaunchedByPath[normalizedPath] = tool;
+      }
+    }
   }
 
-  for (const [projectPath, tool] of Object.entries(sourceMap as Record<string, unknown>)) {
-    const normalizedPath = normalizeProjectPath(projectPath);
-    if (!normalizedPath) {
-      continue;
-    }
-
-    if (tool === TOOL_CODEX || tool === TOOL_CLAUDE) {
-      out.lastLaunchedByPath[normalizedPath] = tool;
+  const rawLastLaunch = rawState?.lastLaunch;
+  if (rawLastLaunch && typeof rawLastLaunch === "object" && !Array.isArray(rawLastLaunch)) {
+    const candidate = rawLastLaunch as RawJson;
+    const launchPath = normalizeProjectPath(candidate.path);
+    const launchTool = candidate.tool;
+    if (launchPath && (launchTool === TOOL_CODEX || launchTool === TOOL_CLAUDE)) {
+      out.lastLaunch = {
+        path: launchPath,
+        tool: launchTool,
+        ts: toEpochMs(candidate.ts),
+      };
     }
   }
 

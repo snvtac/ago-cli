@@ -316,37 +316,17 @@ export async function chooseToolForProject(
   recommendedTool: ToolName,
   prompts: UiDependencies["prompts"],
   chalk: UiDependencies["chalk"]
-): Promise<ToolName | null> {
-  const preferredTool = recommendedTool === TOOL_CLAUDE ? TOOL_CLAUDE : TOOL_CODEX;
-  const fallbackTool = preferredTool === TOOL_CODEX ? TOOL_CLAUDE : TOOL_CODEX;
-
-  const choices = [
-    {
-      name: `${preferredTool} ${chalk.dim("(recommended)")}`,
-      value: preferredTool,
-    },
-    {
-      name: fallbackTool,
-      value: fallbackTool,
-    },
-    {
-      name: chalk.dim("Back to project list"),
-      value: "__back__",
-    },
-  ];
+): Promise<ToolSelection | null> {
+  const choices = buildToolMenuChoices(project, recommendedTool, chalk);
 
   try {
-    const selectedTool = await prompts.select({
+    const selectedValue = await prompts.select({
       message: `Choose CLI for ${project.name}\nPath: ${project.path}`,
       pageSize: 10,
       choices,
     });
 
-    if (selectedTool === "__back__") {
-      return null;
-    }
-
-    return selectedTool as ToolName;
+    return parseToolSelection(selectedValue);
   } catch (error) {
     if (isPromptCancelError(error)) {
       return null;
@@ -544,6 +524,34 @@ async function spawnInteractiveCommand(
   });
 }
 
+async function performLaunch(params: {
+  tool: ToolName;
+  command: string;
+  cwd: string;
+  args: string[];
+  state: AgoState;
+  statePath: string;
+  chalk: UiDependencies["chalk"];
+}): Promise<void> {
+  const { tool, command, cwd, args, state, statePath, chalk } = params;
+
+  state.lastLaunchedByPath[cwd] = tool;
+  state.lastLaunch = { path: cwd, tool, ts: Date.now() };
+  await saveState(state, statePath);
+
+  console.log(chalk.dim(`Launching ${tool} in ${cwd}`));
+
+  const result = await spawnInteractiveCommand(command, args, cwd);
+
+  if (typeof result.code === "number" && result.code !== 0) {
+    console.error(chalk.yellow(`${command} exited with code ${result.code}.`));
+  }
+
+  if (result.signal) {
+    console.error(chalk.yellow(`${command} was terminated by signal ${result.signal}.`));
+  }
+}
+
 export async function runInteractive(options: RunInteractiveOptions): Promise<void> {
   const { prompts, chalk } = await loadUiDependencies();
 
@@ -593,15 +601,16 @@ export async function runInteractive(options: RunInteractiveOptions): Promise<vo
     }
 
     const recommendedTool = getRecommendedTool(project, state, config);
-    const selectedTool = await chooseToolForProject(project, recommendedTool, prompts, chalk);
-    if (!selectedTool) {
+    const selection = await chooseToolForProject(project, recommendedTool, prompts, chalk);
+    if (!selection) {
       if (singleMatchFlow) {
         return;
       }
       continue;
     }
 
-    const command = resolveCommand(selectedTool, config);
+    const { tool, resume } = selection;
+    const command = resolveCommand(tool, config);
 
     if (!isCommandAvailable(command)) {
       console.error(chalk.red(`Command not found: ${command}. Install it or update ~/.ago/config.json`));
@@ -619,21 +628,18 @@ export async function runInteractive(options: RunInteractiveOptions): Promise<vo
       continue;
     }
 
-    state.lastLaunchedByPath[project.path] = selectedTool;
-    await saveState(state, statePath);
-
-    console.log(chalk.dim(`Launching ${selectedTool} in ${project.path}`));
-
-    const result = await spawnInteractiveCommand(command, buildLaunchArgs(selectedTool, options.commandPrompt), project.path);
-
-    if (typeof result.code === "number" && result.code !== 0) {
-      console.error(chalk.yellow(`${command} exited with code ${result.code}.`));
+    let launchArgs: string[];
+    if (resume) {
+      const sessionId = project.lastSessionIdByTool[tool] || "";
+      launchArgs = buildResumeArgs(tool, sessionId);
+      if (options.commandPrompt) {
+        console.log(chalk.dim("Ignoring -c content when resuming a session."));
+      }
+    } else {
+      launchArgs = buildLaunchArgs(tool, options.commandPrompt);
     }
 
-    if (result.signal) {
-      console.error(chalk.yellow(`${command} was terminated by signal ${result.signal}.`));
-    }
-
+    await performLaunch({ tool, command, cwd: project.path, args: launchArgs, state, statePath, chalk });
     return;
   }
 }

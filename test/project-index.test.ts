@@ -10,6 +10,7 @@ import {
   filterProjectsByRoots,
   frecencyWeight,
   mergeProjectObservations,
+  parseClaudeHistoryFile,
   parseClaudeSessionsIndexFile,
   parseCodexSessionFile,
   pickDefaultTool,
@@ -221,5 +222,28 @@ test("parseCodexSessionFile extracts sessionId from payload.id", async () => {
 
     const parsed = await parseCodexSessionFile(sessionPath);
     assert.equal(parsed?.sessionId, "codex-session-1");
+  });
+});
+
+test("parseClaudeHistoryFile groups prompts by sessionId and keeps the latest time", async () => {
+  await withTempDir(async (tempDir) => {
+    const historyPath = path.join(tempDir, "history.jsonl");
+    const lines = [
+      { project: "/tmp/p1", timestamp: "1700000000000", sessionId: "s1" },
+      { project: "/tmp/p1", timestamp: "1700000005000", sessionId: "s1" },
+      { project: "/tmp/p2", timestamp: "1700000002000", sessionId: "s2" },
+      "{not-json}",
+    ]
+      .map((entry) => (typeof entry === "string" ? entry : JSON.stringify(entry)))
+      .join("\n");
+    await fs.writeFile(historyPath, `${lines}\n`, "utf8");
+
+    const observations = await parseClaudeHistoryFile(historyPath);
+
+    assert.equal(observations.length, 2);
+    const s1 = observations.find((obs) => obs.sessionId === "s1");
+    assert.equal(s1?.path, path.resolve("/tmp/p1"));
+    assert.equal(s1?.tool, TOOL_CLAUDE);
+    assert.equal(s1?.lastSeenAt, 1700000005000);
   });
 });

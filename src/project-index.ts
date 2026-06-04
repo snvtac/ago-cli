@@ -324,6 +324,50 @@ export async function parseClaudeSessionsIndexFile(filePath: string): Promise<Pr
   return observations;
 }
 
+export async function parseClaudeHistoryFile(filePath: string): Promise<ProjectObservation[]> {
+  let raw: string;
+  try {
+    raw = await fsp.readFile(filePath, "utf8");
+  } catch {
+    return [];
+  }
+
+  const bySession = new Map<string, ProjectObservation>();
+
+  for (const line of raw.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      continue;
+    }
+
+    let json: RawJson;
+    try {
+      json = JSON.parse(trimmed) as RawJson;
+    } catch {
+      continue;
+    }
+
+    const projectPath = normalizeProjectPath(json.project);
+    const sessionId = typeof json.sessionId === "string" ? json.sessionId : "";
+    if (!projectPath || !sessionId) {
+      continue;
+    }
+
+    const lastSeenAt = toEpochMs(json.timestamp);
+    const existing = bySession.get(sessionId);
+    if (!existing || lastSeenAt > existing.lastSeenAt) {
+      bySession.set(sessionId, {
+        path: projectPath,
+        tool: TOOL_CLAUDE,
+        lastSeenAt,
+        sessionId,
+      });
+    }
+  }
+
+  return [...bySession.values()];
+}
+
 export async function collectClaudeObservations(homeDir = os.homedir()): Promise<ProjectObservation[]> {
   const projectsDir = path.join(homeDir, ".claude", "projects");
 

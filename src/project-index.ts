@@ -26,6 +26,7 @@ export interface ProjectObservation {
   path: string;
   tool: ToolName;
   lastSeenAt: number;
+  sessionId?: string;
 }
 
 export interface ProjectIndexItem {
@@ -97,8 +98,21 @@ export function toEpochMs(value: unknown): number {
     return value;
   }
 
-  if (typeof value === "string" && value.trim()) {
-    const parsed = Date.parse(value);
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return 0;
+    }
+
+    if (/^\d+$/.test(trimmed)) {
+      const numeric = Number(trimmed);
+      if (!Number.isFinite(numeric)) {
+        return 0;
+      }
+      return numeric < 1e12 ? numeric * 1000 : numeric;
+    }
+
+    const parsed = Date.parse(trimmed);
     if (!Number.isNaN(parsed)) {
       return parsed;
     }

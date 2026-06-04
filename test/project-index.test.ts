@@ -12,6 +12,7 @@ import {
   parseClaudeSessionsIndexFile,
   parseCodexSessionFile,
   pickDefaultTool,
+  toEpochMs,
 } from "../src/project-index.js";
 
 async function withTempDir(fn: (tempDir: string) => Promise<void>): Promise<void> {
@@ -156,4 +157,16 @@ test("filterProjectsByRoots only keeps projects under configured roots", () => {
     filtered.map((item) => item.path),
     ["/workspace/a", "/workspace/b"]
   );
+});
+
+test("toEpochMs parses epoch-millisecond strings", () => {
+  assert.equal(toEpochMs("1780554836375"), 1780554836375);
+});
+
+test("toEpochMs upgrades epoch-second strings to milliseconds", () => {
+  assert.equal(toEpochMs("1776852802"), 1776852802000);
+});
+
+test("toEpochMs still parses ISO date strings", () => {
+  assert.equal(toEpochMs("2026-03-18T12:00:00.000Z"), Date.parse("2026-03-18T12:00:00.000Z"));
 });

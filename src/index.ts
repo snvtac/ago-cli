@@ -39,6 +39,11 @@ interface ProjectChoice {
   disabled?: boolean;
 }
 
+interface ToolSelection {
+  tool: ToolName;
+  resume: boolean;
+}
+
 interface UiDependencies {
   prompts: {
     search?: (options: unknown) => Promise<string>;
@@ -428,7 +433,11 @@ export function getRecommendedTool(project: ProjectIndexItem, state: AgoState, c
 }
 
 export function normalizeArgv(argv: string[] = process.argv): string[] {
-  return argv.map((arg) => (arg === "-al" ? "--all" : arg));
+  const mapped = argv.map((arg) => (arg === "-al" ? "--all" : arg));
+  if (mapped[2] === "-") {
+    mapped[2] = "--last";
+  }
+  return mapped;
 }
 
 export function parseCommandPromptOption(input: unknown): string {
@@ -454,6 +463,63 @@ export function buildLaunchArgs(tool: ToolName, commandPrompt: string): string[]
     case TOOL_CLAUDE:
       return [commandPrompt];
   }
+}
+
+export function buildResumeArgs(tool: ToolName, sessionId: string): string[] {
+  if (!sessionId) {
+    return [];
+  }
+
+  switch (tool) {
+    case TOOL_CODEX:
+      return ["resume", sessionId];
+    case TOOL_CLAUDE:
+      return ["--resume", sessionId];
+  }
+}
+
+export function parseToolSelection(value: string): ToolSelection | null {
+  if (value.startsWith("resume:")) {
+    const tool = value.slice("resume:".length);
+    if (tool === TOOL_CODEX || tool === TOOL_CLAUDE) {
+      return { tool, resume: true };
+    }
+  }
+
+  if (value.startsWith("new:")) {
+    const tool = value.slice("new:".length);
+    if (tool === TOOL_CODEX || tool === TOOL_CLAUDE) {
+      return { tool, resume: false };
+    }
+  }
+
+  return null;
+}
+
+export function buildToolMenuChoices(
+  project: ProjectIndexItem,
+  recommendedTool: ToolName,
+  chalk: { dim: (value: string) => string }
+): Array<{ name: string; value: string }> {
+  const preferred = recommendedTool === TOOL_CLAUDE ? TOOL_CLAUDE : TOOL_CODEX;
+  const fallback = preferred === TOOL_CODEX ? TOOL_CLAUDE : TOOL_CODEX;
+
+  const choices: Array<{ name: string; value: string }> = [];
+
+  for (const tool of [preferred, fallback] as ToolName[]) {
+    const hasSession = Boolean(project.lastSessionIdByTool?.[tool]);
+    const recommendedTag = tool === preferred ? ` ${chalk.dim("(recommended)")}` : "";
+
+    if (hasSession) {
+      choices.push({ name: `${tool} — continue last session${recommendedTag}`, value: `resume:${tool}` });
+      choices.push({ name: `${tool} — new session`, value: `new:${tool}` });
+    } else {
+      choices.push({ name: `${tool}${recommendedTag}`, value: `new:${tool}` });
+    }
+  }
+
+  choices.push({ name: chalk.dim("Back to project list"), value: "__back__" });
+  return choices;
 }
 
 async function spawnInteractiveCommand(

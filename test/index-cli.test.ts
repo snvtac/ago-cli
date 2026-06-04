@@ -4,10 +4,13 @@ import path from "node:path";
 
 import {
   buildLaunchArgs,
+  buildResumeArgs,
+  buildToolMenuChoices,
   filterProjectsByNameQuery,
   getRecommendedTool,
   normalizeArgv,
   parseCommandPromptOption,
+  parseToolSelection,
 } from "../src/index.js";
 import { TOOL_CODEX, TOOL_CLAUDE } from "../src/project-index.js";
 
@@ -149,4 +152,40 @@ test("buildLaunchArgs passes initial content to codex", () => {
 
 test("buildLaunchArgs passes initial content to claude", () => {
   assert.deepEqual(buildLaunchArgs(TOOL_CLAUDE, "inspect repo"), ["inspect repo"]);
+});
+
+test("normalizeArgv maps a leading - to --last", () => {
+  assert.deepEqual(normalizeArgv(["node", "dist/cli.js", "-"]), ["node", "dist/cli.js", "--last"]);
+});
+
+test("normalizeArgv leaves - alone when it is a -c value", () => {
+  assert.deepEqual(
+    normalizeArgv(["node", "dist/cli.js", "-c", "-"]),
+    ["node", "dist/cli.js", "-c", "-"]
+  );
+});
+
+test("buildResumeArgs builds codex and claude resume args", () => {
+  assert.deepEqual(buildResumeArgs(TOOL_CODEX, "s1"), ["resume", "s1"]);
+  assert.deepEqual(buildResumeArgs(TOOL_CLAUDE, "s1"), ["--resume", "s1"]);
+  assert.deepEqual(buildResumeArgs(TOOL_CODEX, ""), []);
+});
+
+test("parseToolSelection decodes menu values", () => {
+  assert.deepEqual(parseToolSelection("new:codex"), { tool: TOOL_CODEX, resume: false });
+  assert.deepEqual(parseToolSelection("resume:claude"), { tool: TOOL_CLAUDE, resume: true });
+  assert.equal(parseToolSelection("__back__"), null);
+  assert.equal(parseToolSelection("garbage"), null);
+});
+
+test("buildToolMenuChoices shows continue only for tools with a last session", () => {
+  const project = { lastSessionIdByTool: { claude: "c1" } } as never;
+  const choices = buildToolMenuChoices(project, TOOL_CLAUDE, { dim: (value: string) => value });
+  const values = choices.map((choice) => choice.value);
+
+  assert.ok(values.includes("resume:claude"));
+  assert.ok(values.includes("new:claude"));
+  assert.ok(values.includes("new:codex"));
+  assert.ok(!values.includes("resume:codex"));
+  assert.equal(values[values.length - 1], "__back__");
 });

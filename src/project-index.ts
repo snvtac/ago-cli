@@ -231,10 +231,13 @@ export async function parseCodexSessionFile(filePath: string): Promise<ProjectOb
     }
   }
 
+  const sessionId = typeof payload.id === "string" ? payload.id : undefined;
+
   return {
     path: cwd,
     tool: TOOL_CODEX,
     lastSeenAt,
+    sessionId,
   };
 }
 

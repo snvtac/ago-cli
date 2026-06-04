@@ -209,3 +209,17 @@ test("mergeProjectObservations records the newest sessionId per tool", () => {
   assert.equal(merged[0]?.lastSessionIdByTool.codex, "codex-new");
   assert.equal(merged[0]?.lastSessionIdByTool.claude, "claude-1");
 });
+
+test("parseCodexSessionFile extracts sessionId from payload.id", async () => {
+  await withTempDir(async (tempDir) => {
+    const sessionPath = path.join(tempDir, "rollout.jsonl");
+    const sessionJson = {
+      timestamp: "2026-03-18T12:00:00.000Z",
+      payload: { id: "codex-session-1", cwd: "/tmp/demo-project" },
+    };
+    await fs.writeFile(sessionPath, `${JSON.stringify(sessionJson)}\n`, "utf8");
+
+    const parsed = await parseCodexSessionFile(sessionPath);
+    assert.equal(parsed?.sessionId, "codex-session-1");
+  });
+});

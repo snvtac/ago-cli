@@ -148,9 +148,32 @@ Date format is `YY/MM/DD`.
 
 This stores the last CLI used per project path.
 
+## Diagnostics
+
+### `ago doctor`
+
+Prints a machine-readable JSON health report (runtime, config, state, commands, history sources, project index) to stdout. Read-only — it never writes config/state. Exit code is non-zero only when at least one check is an `error`; warnings keep it `0`.
+
+```bash
+ago doctor
+```
+
+Top-level fields include `formatVersion`, `status` (`ok`/`warning`/`error`), `errorCount`, `warningCount`, `paths` (absolute), and a `checks[]` array of `{ id, category, status, message, details? }`.
+
+### `ago config show`
+
+Prints the normalized config plus the `source` (`file` or `default`) of each key.
+
+```bash
+ago config show
+```
+
+If `~/.ago/config.json` is missing, it returns defaults and exits `0`. If the file exists but is not valid JSON, it returns an error payload with `validJson: false` and exits non-zero.
+
 ## Notes
 
 - `ago list` is removed and intentionally unsupported.
+- `ago doctor` and `ago config show` are read-only and output JSON only (no `--fix`, no text mode in v1).
 - In default mode, missing paths are not shown.
 - In `-al` mode, missing paths are shown and marked as `missing`.
 

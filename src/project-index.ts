@@ -74,6 +74,18 @@ export function getDefaultStatePath(homeDir = os.homedir()): string {
   return path.join(getAgoDir(homeDir), "state.json");
 }
 
+export function getCodexSessionsDir(homeDir = os.homedir()): string {
+  return path.join(homeDir, ".codex", "sessions");
+}
+
+export function getClaudeHistoryPath(homeDir = os.homedir()): string {
+  return path.join(homeDir, ".claude", "history.jsonl");
+}
+
+export function getClaudeProjectsDir(homeDir = os.homedir()): string {
+  return path.join(homeDir, ".claude", "projects");
+}
+
 function expandHome(inputPath: unknown, homeDir = os.homedir()): string {
   if (typeof inputPath !== "string") {
     return "";
@@ -101,6 +113,10 @@ function normalizeProjectPath(inputPath: unknown): string {
   }
 
   return path.resolve(trimmed);
+}
+
+export function resolveConfiguredRoot(root: string, homeDir = os.homedir()): string {
+  return normalizeProjectPath(expandHome(root, homeDir));
 }
 
 export function toEpochMs(value: unknown): number {
@@ -247,7 +263,7 @@ export async function parseCodexSessionFile(filePath: string): Promise<ProjectOb
 }
 
 export async function collectCodexObservations(homeDir = os.homedir()): Promise<ProjectObservation[]> {
-  const sessionsDir = path.join(homeDir, ".codex", "sessions");
+  const sessionsDir = getCodexSessionsDir(homeDir);
 
   if (!fs.existsSync(sessionsDir)) {
     return [];
@@ -453,7 +469,7 @@ export async function parseClaudeTranscriptFile(filePath: string): Promise<Proje
 }
 
 export async function collectClaudeFromTranscripts(homeDir = os.homedir()): Promise<ProjectObservation[]> {
-  const projectsDir = path.join(homeDir, ".claude", "projects");
+  const projectsDir = getClaudeProjectsDir(homeDir);
   if (!fs.existsSync(projectsDir)) {
     return [];
   }
@@ -511,7 +527,7 @@ export async function collectClaudeFromTranscripts(homeDir = os.homedir()): Prom
 }
 
 export async function collectClaudeFromSessionsIndex(homeDir = os.homedir()): Promise<ProjectObservation[]> {
-  const projectsDir = path.join(homeDir, ".claude", "projects");
+  const projectsDir = getClaudeProjectsDir(homeDir);
 
   if (!fs.existsSync(projectsDir)) {
     return [];
@@ -544,7 +560,7 @@ export async function collectClaudeFromSessionsIndex(homeDir = os.homedir()): Pr
 }
 
 export async function collectClaudeObservations(homeDir = os.homedir()): Promise<ProjectObservation[]> {
-  const historyPath = path.join(homeDir, ".claude", "history.jsonl");
+  const historyPath = getClaudeHistoryPath(homeDir);
 
   const [fromHistory, fromTranscripts, fromLegacy] = await Promise.all([
     parseClaudeHistoryFile(historyPath),

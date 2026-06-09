@@ -11,12 +11,16 @@ import {
   collectClaudeObservations,
   filterProjectsByRoots,
   frecencyWeight,
+  getClaudeHistoryPath,
+  getClaudeProjectsDir,
+  getCodexSessionsDir,
   mergeProjectObservations,
   normalizeState,
   parseClaudeHistoryFile,
   parseClaudeSessionsIndexFile,
   parseCodexSessionFile,
   pickDefaultTool,
+  resolveConfiguredRoot,
   toEpochMs,
 } from "../src/project-index.js";
 
@@ -342,4 +346,18 @@ test("normalizeState keeps lastLaunch even when lastLaunchedByPath is absent", (
   const state = normalizeState({ lastLaunch: { path: "/tmp/proj", tool: "codex", ts: 5 } });
   assert.equal(state.lastLaunch?.path, path.resolve("/tmp/proj"));
   assert.equal(state.lastLaunch?.tool, "codex");
+});
+
+test("path getters build the expected source locations under a home dir", () => {
+  const home = path.resolve("/tmp/ago-home");
+  assert.equal(getCodexSessionsDir(home), path.join(home, ".codex", "sessions"));
+  assert.equal(getClaudeHistoryPath(home), path.join(home, ".claude", "history.jsonl"));
+  assert.equal(getClaudeProjectsDir(home), path.join(home, ".claude", "projects"));
+});
+
+test("resolveConfiguredRoot expands ~ and resolves to absolute", () => {
+  const home = path.resolve("/tmp/ago-home");
+  assert.equal(resolveConfiguredRoot("~/git", home), path.join(home, "git"));
+  assert.equal(resolveConfiguredRoot("/abs/path", home), path.resolve("/abs/path"));
+  assert.equal(resolveConfiguredRoot("", home), "");
 });

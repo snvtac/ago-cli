@@ -800,6 +800,39 @@ async function readJsonFile(filePath: string): Promise<RawJson | null> {
   }
 }
 
+export interface JsonFileInspection {
+  path: string;
+  exists: boolean;
+  validJson: boolean;
+  raw?: RawJson;
+  error?: string;
+}
+
+export async function inspectJsonFile(filePath: string): Promise<JsonFileInspection> {
+  let contents: string;
+  try {
+    contents = await fsp.readFile(filePath, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code === "ENOENT") {
+      return { path: filePath, exists: false, validJson: true };
+    }
+    return { path: filePath, exists: true, validJson: false, error: (error as Error).message };
+  }
+
+  try {
+    const parsed = JSON.parse(contents) as unknown;
+    const isObject = parsed !== null && typeof parsed === "object" && !Array.isArray(parsed);
+    return {
+      path: filePath,
+      exists: true,
+      validJson: true,
+      raw: isObject ? (parsed as RawJson) : undefined,
+    };
+  } catch (error) {
+    return { path: filePath, exists: true, validJson: false, error: (error as Error).message };
+  }
+}
+
 export async function loadConfig(configPath = getDefaultConfigPath()): Promise<AgoConfig> {
   const raw = await readJsonFile(configPath);
   return normalizeConfig(raw || {});

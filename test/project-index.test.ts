@@ -14,6 +14,7 @@ import {
   getClaudeHistoryPath,
   getClaudeProjectsDir,
   getCodexSessionsDir,
+  inspectJsonFile,
   mergeProjectObservations,
   normalizeState,
   parseClaudeHistoryFile,
@@ -360,4 +361,49 @@ test("resolveConfiguredRoot expands ~ and resolves to absolute", () => {
   assert.equal(resolveConfiguredRoot("~/git", home), path.join(home, "git"));
   assert.equal(resolveConfiguredRoot("/abs/path", home), path.resolve("/abs/path"));
   assert.equal(resolveConfiguredRoot("", home), "");
+});
+
+test("inspectJsonFile reports missing file as exists=false, validJson=true", async () => {
+  await withTempDir(async (tempDir) => {
+    const filePath = path.join(tempDir, "nope.json");
+    const result = await inspectJsonFile(filePath);
+    assert.equal(result.path, filePath);
+    assert.equal(result.exists, false);
+    assert.equal(result.validJson, true);
+    assert.equal(result.raw, undefined);
+  });
+});
+
+test("inspectJsonFile parses a valid JSON object", async () => {
+  await withTempDir(async (tempDir) => {
+    const filePath = path.join(tempDir, "ok.json");
+    await fs.writeFile(filePath, JSON.stringify({ a: 1 }), "utf8");
+    const result = await inspectJsonFile(filePath);
+    assert.equal(result.exists, true);
+    assert.equal(result.validJson, true);
+    assert.deepEqual(result.raw, { a: 1 });
+  });
+});
+
+test("inspectJsonFile reports invalid JSON with an error", async () => {
+  await withTempDir(async (tempDir) => {
+    const filePath = path.join(tempDir, "bad.json");
+    await fs.writeFile(filePath, "{not json}", "utf8");
+    const result = await inspectJsonFile(filePath);
+    assert.equal(result.exists, true);
+    assert.equal(result.validJson, false);
+    assert.equal(typeof result.error, "string");
+    assert.equal(result.raw, undefined);
+  });
+});
+
+test("inspectJsonFile treats non-object JSON as valid with no raw", async () => {
+  await withTempDir(async (tempDir) => {
+    const filePath = path.join(tempDir, "scalar.json");
+    await fs.writeFile(filePath, "5", "utf8");
+    const result = await inspectJsonFile(filePath);
+    assert.equal(result.exists, true);
+    assert.equal(result.validJson, true);
+    assert.equal(result.raw, undefined);
+  });
 });

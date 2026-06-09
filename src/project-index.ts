@@ -833,6 +833,66 @@ export async function inspectJsonFile(filePath: string): Promise<JsonFileInspect
   }
 }
 
+export type ConfigSource = "file" | "default";
+
+export interface ConfigInspection {
+  path: string;
+  exists: boolean;
+  validJson: boolean;
+  error?: string;
+  value: AgoConfig;
+  sources: Record<keyof AgoConfig, ConfigSource>;
+  invalidKeys: Array<keyof AgoConfig>;
+}
+
+export async function inspectConfig(configPath = getDefaultConfigPath()): Promise<ConfigInspection> {
+  const file = await inspectJsonFile(configPath);
+  const raw = file.raw ?? {};
+  const value = normalizeConfig(raw);
+
+  const sources: Record<keyof AgoConfig, ConfigSource> = {
+    roots: "default",
+    claudeCommand: "default",
+    preferredTool: "default",
+  };
+  const invalidKeys: Array<keyof AgoConfig> = [];
+
+  if ("roots" in raw) {
+    if (Array.isArray(raw.roots)) {
+      sources.roots = "file";
+    } else {
+      invalidKeys.push("roots");
+    }
+  }
+
+  if ("claudeCommand" in raw) {
+    if (typeof raw.claudeCommand === "string" && raw.claudeCommand.trim().length > 0) {
+      sources.claudeCommand = "file";
+    } else {
+      invalidKeys.push("claudeCommand");
+    }
+  }
+
+  if ("preferredTool" in raw) {
+    const candidate = raw.preferredTool;
+    if (candidate === "auto" || candidate === TOOL_CODEX || candidate === TOOL_CLAUDE) {
+      sources.preferredTool = "file";
+    } else {
+      invalidKeys.push("preferredTool");
+    }
+  }
+
+  return {
+    path: configPath,
+    exists: file.exists,
+    validJson: file.validJson,
+    error: file.error,
+    value,
+    sources,
+    invalidKeys,
+  };
+}
+
 export async function loadConfig(configPath = getDefaultConfigPath()): Promise<AgoConfig> {
   const raw = await readJsonFile(configPath);
   return normalizeConfig(raw || {});

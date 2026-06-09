@@ -14,6 +14,7 @@ import {
   getClaudeHistoryPath,
   getClaudeProjectsDir,
   getCodexSessionsDir,
+  inspectConfig,
   inspectJsonFile,
   mergeProjectObservations,
   normalizeState,
@@ -405,5 +406,52 @@ test("inspectJsonFile treats non-object JSON as valid with no raw", async () => 
     assert.equal(result.exists, true);
     assert.equal(result.validJson, true);
     assert.equal(result.raw, undefined);
+  });
+});
+
+test("inspectConfig on missing file returns defaults with all sources default", async () => {
+  await withTempDir(async (tempDir) => {
+    const configPath = path.join(tempDir, "config.json");
+    const result = await inspectConfig(configPath);
+    assert.equal(result.exists, false);
+    assert.equal(result.validJson, true);
+    assert.deepEqual(result.value, { roots: [], claudeCommand: "claude", preferredTool: "auto" });
+    assert.deepEqual(result.sources, { roots: "default", claudeCommand: "default", preferredTool: "default" });
+    assert.deepEqual(result.invalidKeys, []);
+  });
+});
+
+test("inspectConfig marks present valid keys as file and absent keys as default", async () => {
+  await withTempDir(async (tempDir) => {
+    const configPath = path.join(tempDir, "config.json");
+    await fs.writeFile(configPath, JSON.stringify({ roots: ["/Users/x/git"] }), "utf8");
+    const result = await inspectConfig(configPath);
+    assert.equal(result.exists, true);
+    assert.equal(result.value.roots.length, 1);
+    assert.equal(result.sources.roots, "file");
+    assert.equal(result.sources.claudeCommand, "default");
+    assert.equal(result.sources.preferredTool, "default");
+    assert.deepEqual(result.invalidKeys, []);
+  });
+});
+
+test("inspectConfig treats explicitly-written default values as file (regression for source rule)", async () => {
+  await withTempDir(async (tempDir) => {
+    const configPath = path.join(tempDir, "config.json");
+    await fs.writeFile(configPath, JSON.stringify({ roots: [], claudeCommand: "claude", preferredTool: "auto" }), "utf8");
+    const result = await inspectConfig(configPath);
+    assert.deepEqual(result.sources, { roots: "file", claudeCommand: "file", preferredTool: "file" });
+    assert.deepEqual(result.invalidKeys, []);
+  });
+});
+
+test("inspectConfig records present-but-invalid keys and falls back to defaults", async () => {
+  await withTempDir(async (tempDir) => {
+    const configPath = path.join(tempDir, "config.json");
+    await fs.writeFile(configPath, JSON.stringify({ roots: "nope", claudeCommand: 123, preferredTool: "banana" }), "utf8");
+    const result = await inspectConfig(configPath);
+    assert.deepEqual(result.value, { roots: [], claudeCommand: "claude", preferredTool: "auto" });
+    assert.deepEqual(result.sources, { roots: "default", claudeCommand: "default", preferredTool: "default" });
+    assert.deepEqual([...result.invalidKeys].sort(), ["claudeCommand", "preferredTool", "roots"]);
   });
 });

@@ -1,8 +1,8 @@
 # ago-cli doctor/config 诊断与配置查看 设计文档
 
-- 日期:2026-06-07
+- 日期:2026-06-07(修订:2026-06-09,经设计评审挑战后更新)
 - 范围:`ago doctor`、`ago config show`
-- 方向约束:**只读诊断优先**,不写配置/状态,不新增运行时依赖,保持现有文件边界(`project-index.ts` 管数据与文件读取,`index.ts` 管 CLI 命令与输出)。
+- 方向约束:**只读诊断优先**,不写配置/状态,不新增运行时依赖,保持现有文件边界(`project-index.ts` 管数据与文件读取,`index.ts` 管 CLI 命令与输出,纯诊断逻辑下沉到新增 `doctor.ts`)。
 
 ---
 
@@ -32,8 +32,8 @@
   - 对 `ago` 的落地:固定分类为 `runtime`、`config`、`state`、`commands`、`sources`、`projects`。
   - 参考:https://docs.npmjs.com/cli/v11/commands/npm-doctor/
 - mise `mise doctor`
-  - 借鉴点:支持 JSON 输出,展示版本、目录、环境变量、配置文件和问题摘要;errors 才触发失败语义。
-  - 对 `ago` 的落地:`ago doctor` 只输出 JSON;warning 不影响退出码,error 才非零。
+  - 借鉴点:支持 JSON 输出,展示版本、目录、环境变量、配置文件和问题摘要;errors 才触发失败语义;路径按真实绝对路径输出。
+  - 对 `ago` 的落地:`ago doctor` 只输出 JSON;warning 不影响退出码,error 才非零;`paths` 输出真实绝对路径(见 §4.4)。
   - 参考:https://mise.jdx.dev/cli/doctor.html
 - Flutter `flutter doctor --machine`
   - 借鉴点:同一健康检查能力可被机器消费。
@@ -44,7 +44,7 @@
 
 - Terraform `terraform validate -json`
   - 借鉴点:顶层带 `format_version`、`valid`、`error_count`、`warning_count`,便于脚本判断和未来兼容。
-  - 对 `ago` 的落地:顶层固定 `formatVersion`、`status`、`errorCount`、`warningCount`、`checks`。
+  - 对 `ago` 的落地:doctor 与 config show 顶层都固定 `formatVersion`;doctor 另有 `status`、`errorCount`、`warningCount`、`checks`。
   - 参考:https://developer.hashicorp.com/terraform/cli/commands/validate
 - kubectl `kubectl config view -o json|yaml`
   - 借鉴点:配置查看命令可以明确支持机器可读输出,并避免默认暴露敏感 raw 内容。
@@ -66,7 +66,28 @@
 
 ## 3. 用户接口
 
-### 3.1 `ago doctor`
+### 3.1 命令树与 commander 组织
+
+当前 `src/index.ts` 是**纯默认 action、零子命令**结构:`program.action()` 直接进入交互流程,顶层带 `-a/-n/-c/-l` 选项。本轮要在保留默认交互行为的同时,新增两个子命令树,三者共存:
+
+```
+ago                 # 默认 action:交互式项目选择(保持不变)
+ago -al / -n / -c / -l   # 默认 action 的选项(保持不变)
+ago doctor          # 新增子命令
+ago config show     # 新增两级子命令
+ago config          # 裸 config:打印 config 子命令的 help,退出码 0
+```
+
+commander v12 同时支持"程序级默认 action + 命名子命令":输入匹配到 `doctor`/`config` 时分派到对应子命令 action,否则落到程序默认 action。组织约定:
+
+- `program.command("doctor").action(...)`。
+- `const configCmd = program.command("config")`;`configCmd.command("show").action(...)`;`configCmd.action(() => configCmd.help())` 处理裸 `ago config`。
+- 程序默认 `program.action(...)` 保持现有交互逻辑不变。
+- 子命令不接受 `-a/-n/-c/-l`;未知选项交由 commander 报错(沿用 `showHelpAfterError`)。
+
+`normalizeArgv` 的既有映射(`-al`→`--all`、`argv[2] === "-"`→`--last`)对子命令安全:`doctor`/`config`/`show` 都不等于 `-`/`-al`,不会被改写。子命令本身不接收位置参数,`allowExcessArguments(false)` 不受影响。
+
+### 3.2 `ago doctor`
 
 ```
 ago doctor
@@ -74,11 +95,11 @@ ago doctor
 
 行为:
 
-- 输出 JSON 到 stdout。
+- 输出 JSON 到 stdout(`JSON.stringify(report, null, 2)`)。
 - 不进入项目选择交互。
 - 不读取 transcript 正文超过现有 collector 所需内容。
 - 不修改 `~/.ago/config.json`、`~/.ago/state.json`、Codex/Claude 历史文件或任何 cache。
-- 只有 `errorCount > 0` 时设置非零退出码;只有 warning 时退出码仍为 0。
+- 先把完整 JSON 写到 stdout,再根据 `errorCount` 设置退出码:只有 `errorCount > 0` 时 `process.exitCode = 1`;只有 warning 时退出码仍为 0。
 
 第一版不支持:
 
@@ -88,7 +109,7 @@ ago doctor
 - `ago doctor <check-id>`
 - 文本人类模式
 
-### 3.2 `ago config show`
+### 3.3 `ago config show`
 
 ```
 ago config show
@@ -99,7 +120,7 @@ ago config show
 - 输出 JSON 到 stdout。
 - 展示 `~/.ago/config.json` 的存在性、JSON 有效性、normalized config、每个 key 的来源。
 - 配置文件不存在时返回默认配置,退出码 0。
-- 配置文件存在但 JSON 无法解析时输出 error payload,退出码非零。
+- 配置文件存在但 JSON 无法解析时输出 error payload,退出码非零(`process.exitCode = 1`)。
 
 第一版不支持:
 
@@ -126,11 +147,11 @@ ago config show
   "errorCount": 0,
   "warningCount": 2,
   "paths": {
-    "config": "~/.ago/config.json",
-    "state": "~/.ago/state.json",
-    "codexSessions": "~/.codex/sessions",
-    "claudeHistory": "~/.claude/history.jsonl",
-    "claudeProjects": "~/.claude/projects"
+    "config": "/Users/example/.ago/config.json",
+    "state": "/Users/example/.ago/state.json",
+    "codexSessions": "/Users/example/.codex/sessions",
+    "claudeHistory": "/Users/example/.claude/history.jsonl",
+    "claudeProjects": "/Users/example/.claude/projects"
   },
   "config": {
     "exists": true,
@@ -182,20 +203,21 @@ ago config show
       "id": "config.valid_json",
       "category": "config",
       "status": "ok",
-      "severity": "info",
       "message": "Config file is valid JSON"
     }
   ]
 }
 ```
 
-### 4.2 Status 与 severity
+### 4.2 Status 与 check 结构
 
 顶层 `status` 由检查项聚合得到:
 
 - 任一 check `status === "error"` → 顶层 `status = "error"`。
 - 否则任一 check `status === "warning"` → 顶层 `status = "warning"`。
 - 否则顶层 `status = "ok"`。
+
+`errorCount` = `status === "error"` 的 check 数;`warningCount` = `status === "warning"` 的 check 数。
 
 每个 check:
 
@@ -204,27 +226,23 @@ interface DoctorCheck {
   id: string;
   category: "runtime" | "config" | "state" | "commands" | "sources" | "projects";
   status: "ok" | "warning" | "error";
-  severity: "info" | "warning" | "error";
   message: string;
   details?: Record<string, unknown>;
 }
 ```
 
-`severity` 与 `status` 第一版保持一致语义:
-
-- `ok` → `info`
-- `warning` → `warning`
-- `error` → `error`
-
-保留两个字段是为了后续能表达"检查通过,但附带 info"或"状态失败,但只是 soft warning"这类扩展。
+> 设计评审决定:删除原 `severity` 字段。第一版 `severity` 与 `status` 完全同义,没有任何 check 会用到二者差异,属于过度设计。未来若真要表达"通过但带 info"/"失败但 soft warning",再加字段是向后兼容变更,不会破坏已有机器消费者。
 
 ### 4.3 Config show 结构
+
+顶层带 `formatVersion`,与 doctor 对齐,承诺 schema 稳定、可被脚本按版本兼容处理。
 
 配置文件缺失:
 
 ```json
 {
-  "path": "~/.ago/config.json",
+  "formatVersion": "1.0",
+  "path": "/Users/example/.ago/config.json",
   "exists": false,
   "validJson": true,
   "value": {
@@ -244,7 +262,8 @@ interface DoctorCheck {
 
 ```json
 {
-  "path": "~/.ago/config.json",
+  "formatVersion": "1.0",
+  "path": "/Users/example/.ago/config.json",
   "exists": true,
   "validJson": true,
   "value": {
@@ -264,7 +283,8 @@ interface DoctorCheck {
 
 ```json
 {
-  "path": "~/.ago/config.json",
+  "formatVersion": "1.0",
+  "path": "/Users/example/.ago/config.json",
   "exists": true,
   "validJson": false,
   "error": "Unexpected token ...",
@@ -281,6 +301,12 @@ interface DoctorCheck {
 }
 ```
 
+### 4.4 路径输出约定
+
+`doctor.paths.*` 与 `config show.path` 一律输出**真实绝对路径**(`getDefaultConfigPath()` 等已返回绝对路径,直接使用,不做 `~` 折叠)。
+
+理由:doctor 是本机调试入口,真实路径最有用,对齐 `mise doctor` / `kubectl config view`。绝对路径会包含 home 目录用户名,但这不属于 §7 定义的敏感内容(token/prompt 正文/transcript 内容);用户名在本机调试语境下可接受。
+
 ---
 
 ## 5. 检查项
@@ -290,8 +316,8 @@ interface DoctorCheck {
 | id | error/warning | 说明 |
 |---|---|---|
 | `runtime.node_version` | error | Node 版本低于 `package.json#engines.node`。 |
-| `runtime.platform` | ok | 输出 `process.platform`、`process.arch`。 |
-| `runtime.package_version` | ok | 输出 `package.json#version`。 |
+
+> `platform`、`version` 已作为 doctor 顶层字段输出,不再单列恒 `ok` 的 check,避免重复噪声。
 
 ### 5.2 Config
 
@@ -299,10 +325,11 @@ interface DoctorCheck {
 |---|---|---|
 | `config.exists` | warning | `~/.ago/config.json` 不存在。因为默认配置可用,不是 error。 |
 | `config.valid_json` | error | 文件存在但 JSON 无法解析。 |
-| `config.normalized` | warning | 存在无效字段类型并被 fallback 到默认值。 |
+| `config.normalized` | warning | 存在 key **存在但类型/取值非法**并被 fallback 到默认值;`details.invalidKeys` 列出这些 key。 |
 | `config.roots_exist` | warning | `roots` 中某个路径不存在。 |
 | `config.roots_filter_nonempty` | warning | 配置了 roots,但过滤后没有项目。 |
-| `config.preferred_tool` | error | `preferredTool` 不是 `auto/codex/claude` 且无法 normalize。实现上如果 normalize 可兜底,该 check 可记录 warning。 |
+
+> 设计评审决定:删除原 `config.preferred_tool`(error) 检查。非法 `preferredTool` 会被 `normalizeConfig` 兜底到 `auto`、normalize 永不抛错,该情况已被 `config.normalized` warning 覆盖,单列 error 既冗余又与"配置缺失/损坏才升级"的语义不符。
 
 ### 5.3 State
 
@@ -317,10 +344,12 @@ interface DoctorCheck {
 
 | id | error/warning | 说明 |
 |---|---|---|
-| `commands.codex_available` | warning | `codex` 不在 PATH。若没有 Codex observations,只 warning。 |
+| `commands.codex_available` | warning/error | `codex` 不在 PATH。若存在 Codex observations,为 error;否则 warning。 |
 | `commands.claude_available` | warning/error | `claudeCommand` 不可执行。若存在 Claude observations,为 error;否则 warning。 |
 
 `codex` 当前不可配置,仍用 `codex` 作为 command 名。
+
+> 实现注意:这两个 check 的 error 升级依赖 observations 计数,因此**聚合流程必须先收集 observations、再生成 commands check**(见 §6.5 顺序)。
 
 ### 5.5 Sources
 
@@ -347,18 +376,20 @@ interface DoctorCheck {
 
 ### 6.1 文件边界
 
-- `src/project-index.ts`
-  - 新增 detailed JSON 读取 helper,区分 missing / invalid / valid。
-  - 新增 config inspection helper,返回 normalized config 与 per-key source。
-  - 新增 state inspection helper,返回 normalized state 与 JSON 文件健康状态。
-  - 新增 source/project summary helper,复用现有 collectors 和 `buildProjectIndex`。
-- `src/index.ts`
-  - 新增 commander 子命令 `doctor`。
-  - 新增 commander 子命令 `config show`。
+- `src/project-index.ts`(数据与文件读取)
+  - 新增 detailed JSON 读取 helper(`inspectJsonFile`),区分 missing / invalid / valid。
+  - 新增 config inspection helper(`inspectConfig`),返回 normalized config、per-key `source`、`invalidKeys`(见 §6.3)。
+  - 新增 state inspection helper(`inspectState`),返回 normalized state 与 JSON 文件健康状态。
+  - 复用现有 `collectCodexObservations` / `collectClaudeObservations` / `buildProjectIndex`。
+- `src/doctor.ts`(新增,纯诊断逻辑)
+  - 承载 doctor 报告聚合与 check 生成(`buildDoctorReport`)及 config show 报告构造(`buildConfigShowReport`),均为可注入 `now`/`homeDir` 的纯/准纯函数,便于单测。
+  - **不引入新运行时依赖**;文件读取通过 project-index.ts 的 helper 完成。
+  - 设计评审决定新增此文件:`index.ts`(717 行)、`project-index.ts`(868 行)已较大,诊断聚合若塞进 `index.ts` 会继续膨胀且难测;独立 `doctor.ts` 让纯逻辑可注入、可单测。
+- `src/index.ts`(CLI 命令与输出)
+  - 新增 commander 子命令 `doctor` 与 `config show`(组织见 §3.1)。
   - 负责把诊断对象 `JSON.stringify(..., null, 2)` 输出到 stdout。
-  - 负责根据 `errorCount` 设置 `process.exitCode = 1`。
-
-不新增文件也可以完成第一版。但如果 `src/index.ts` 继续膨胀,允许新增 `src/doctor.ts` 专门承载纯诊断逻辑;该文件不能引入新运行时依赖。
+  - 负责在输出后根据 `errorCount`(doctor)或 `validJson`(config show)设置 `process.exitCode = 1`。
+  - 退出码决策留在 CLI 层;`doctor.ts` 纯函数只返回 `errorCount` 等计数,不碰 `process`。
 
 ### 6.2 JSON 读取 helper
 
@@ -366,7 +397,7 @@ interface DoctorCheck {
 
 ```ts
 interface JsonFileInspection {
-  path: string;
+  path: string;          // 绝对路径
   exists: boolean;
   validJson: boolean;
   raw?: Record<string, unknown>;
@@ -380,40 +411,56 @@ interface JsonFileInspection {
 - 文件存在且解析成功:`exists=true`, `validJson=true`, `raw=...`。
 - 文件存在但解析失败:`exists=true`, `validJson=false`, `error=...`。
 
-### 6.3 Config source 判定
+### 6.3 Config source 判定(统一规则)
 
-只针对已支持 key:
+只针对已支持 key:`roots`、`claudeCommand`、`preferredTool`。
 
-- `roots`
-- `claudeCommand`
-- `preferredTool`
+**统一规则**:`source` 只看 raw config 里该 key **是否存在且取值/类型合法**,与 `normalizeConfig` 内部是否走了 fallback 分支解耦:
 
-若 raw config 中该 key 类型有效且被采用,source 为 `file`;否则为 `default`。
+| key | `source = "file"` 的条件 | 否则 |
+|---|---|---|
+| `roots` | raw 里 `roots` 存在且为数组 | `default` |
+| `claudeCommand` | raw 里 `claudeCommand` 存在且为非空字符串 | `default` |
+| `preferredTool` | raw 里 `preferredTool` 存在且 ∈ `{auto, codex, claude}` | `default` |
 
-无效字段类型第一版不需要在 `config show` 里单独列 issue;但 `doctor` 应通过 `config.normalized` check 给 warning。
+由此消除原设计的不一致:显式写 `"preferredTool": "auto"` 与显式写 `"claudeCommand": "claude"` 现在都判为 `file`(都是"显式配置了恰好等于默认值")。
+
+inspection 同时按 key 区分三态,供 `config.normalized` 警告使用:
+
+- **缺失**:key 不在 raw → `source=default`,**不进** `invalidKeys`。
+- **存在但非法**:key 在 raw 但类型/取值非法 → `source=default`,**进** `invalidKeys`。
+- **存在且合法**:→ `source=file`。
+
+`config.normalized` 警告 ⟺ `invalidKeys` 非空;`details.invalidKeys` 列出具体 key。`config show` 第一版不单独展示 `invalidKeys`,只通过 `sources` 间接体现;doctor 通过 `config.normalized` 给 warning。
 
 ### 6.4 命令可用性
 
 复用 `isCommandAvailable(commandName)`:
 
 - Codex command 固定为 `codex`。
-- Claude command 通过 normalized config 的 `claudeCommand` 解析。
+- Claude command 通过 normalized config 的 `claudeCommand` 解析(复用 `resolveCommand`)。
 - 如果命令名包含路径分隔符,沿用现有可执行文件检查逻辑。
 
 ### 6.5 诊断聚合
 
-构建流程:
+`buildDoctorReport({ homeDir, now, version, nodeVersion, platform })` 构建流程(顺序经评审调整):
 
-1. 读取 package version、Node/platform。
-2. inspect config,得到 normalized config。
+1. 读取 package version、Node/platform(由调用方注入,或在 `index.ts` 从 `process`/`package.json` 取值后传入)。
+2. inspect config,得到 normalized config、sources、invalidKeys。
 3. inspect state。
-4. 检查 commands。
-5. 收集 Codex/Claude observations。
-6. 使用 normalized config build project index。
+4. **收集 Codex/Claude observations**(提前到 commands 之前,供其 error 升级判定)。
+5. 使用 normalized config build project index。
+6. 检查 commands(用第 4 步的 observations 计数决定 warning/error)。
 7. 生成 checks。
 8. 由 checks 聚合 `status/errorCount/warningCount`。
 
-若某一步出现未预期异常,doctor 不应抛出裸异常;应返回 `status=error` 和一个 `doctor.unexpected_error` check,并设置 exit 1。
+`checkedAt` 使用注入的 `now`(便于测试固定时间);`buildProjectIndex`/`mergeProjectObservations` 内部的 `Date.now()` 在测试中通过临时 home + 受控数据规避,纯函数本身不直接调用 `Date.now()`。
+
+若某一步出现未预期异常,doctor 不应抛出裸异常;应返回 `status=error` 和一个 `id: "runtime.unexpected_error"`、`category: "runtime"` 的 check(把诊断器自身失败归入 runtime 类别),`details.error` 携带异常 message,并由 `index.ts` 设置 exit 1。
+
+### 6.6 性能说明
+
+`buildDoctorReport` 会跑一次完整 `buildProjectIndex`(读取全部 Codex session 文件首行 + 每个 Claude project 目录最新 transcript 前若干行)。该成本与正常 `ago` 启动一致,不额外引入更重的扫描,可接受;第一版不做缓存。
 
 ---
 
@@ -427,7 +474,8 @@ interface JsonFileInspection {
 - Codex observations 存在但 `codex` 不可用:doctor error;若不存在 Codex observations,warning。
 - `roots` 全部不存在或过滤后为空:warning。
 - 存在 missing 项目:warning;这是 `-al` 的正常可见状态。
-- `doctor` 输出不得包含 prompt 正文、session transcript 内容或 access token。
+- 显式写了恰好等于默认值的字段:`source=file`(见 §6.3)。
+- `doctor`/`config show` 输出不得包含 prompt 正文、session transcript 内容或 access token;绝对路径(含用户名)不视为敏感内容。
 
 ---
 
@@ -437,30 +485,33 @@ interface JsonFileInspection {
 
 ### 8.1 纯函数单测
 
-- detailed JSON read:
+- detailed JSON read(`inspectJsonFile`):
   - missing file。
   - valid JSON。
   - invalid JSON。
-- config inspection:
-  - missing config → normalized defaults + sources 全 default。
+- config inspection(`inspectConfig`):
+  - missing config → normalized defaults + sources 全 default + invalidKeys 空。
   - partial config → file/default source 混合。
-  - invalid field type → normalized fallback + doctor warning。
-- state inspection:
+  - 显式默认值(`preferredTool: "auto"`、`claudeCommand: "claude"`)→ source 全 `file`(回归 §6.3 统一规则)。
+  - invalid field type → normalized fallback + source=default + 进 invalidKeys。
+- state inspection(`inspectState`):
   - missing state。
   - invalid JSON。
   - `lastLaunch.path` missing。
-- check aggregation:
-  - only ok → `status=ok`, exit semantic 0。
-  - warning only → `status=warning`, exit semantic 0。
-  - at least one error → `status=error`, exit semantic 1。
+- check aggregation(`buildDoctorReport`,注入固定 `now`):
+  - only ok → `status=ok`, errorCount 0。
+  - warning only → `status=warning`, errorCount 0。
+  - at least one error → `status=error`, errorCount ≥ 1。
+  - commands error 升级:构造 Claude observation + 不可用 `claudeCommand` → `commands.claude_available` 为 error。
 
 ### 8.2 集成/CLI 测试
 
-- `ago config show` 在临时 home 无 config 时输出可 parse JSON。
+- `ago config show` 在临时 home 无 config 时输出可 parse JSON,含 `formatVersion`。
 - `ago config show` 在有效 partial config 时输出 normalized config。
 - `ago config show` 在 invalid config 时 exit 1 且输出 `validJson=false`。
 - `ago doctor` 在空临时 home 输出 parseable JSON,包含 `formatVersion/status/checks`。
-- `ago doctor` 在构造 Claude observation 但 `claudeCommand` 指向不存在命令时返回 error。
+- `ago doctor` 在构造 Claude observation 但 `claudeCommand` 指向不存在命令时返回 error(exit 1)。
+- `ago config`(裸命令)打印 help、exit 0。
 - 现有 `ago --help`、`ago -`、`-al`、`-n`、`-c` 行为不变。
 
 ### 8.3 验证命令
@@ -488,9 +539,13 @@ node --import tsx src/cli.ts config show | node -e 'let s="";process.stdin.on("d
 ## 10. 已定决策
 
 - `ago doctor` 第一版 JSON-only。
-- `ago config show` 第一版只读。
-- warning 不导致非零退出码;error 才非零。
+- `ago config show` 第一版只读;doctor 与 config show 顶层都带 `formatVersion`。
+- warning 不导致非零退出码;error 才非零;退出码在 `index.ts` 输出 JSON 后设置。
 - 配置缺失不是错误;配置 JSON 损坏是错误。
 - State 损坏不是错误,因为可 fallback,但必须 warning。
-- doctor 不写任何文件。
-- 不新增运行时依赖。
+- doctor 不写任何文件;不新增运行时依赖。
+- 路径输出真实绝对路径,不折叠 `~`。
+- `source` 判定只看 raw key 是否存在且合法,统一 file/default 规则。
+- 删除 `severity` 字段、`config.preferred_tool`/`runtime.platform`/`runtime.package_version` 检查(过度设计/冗余)。
+- 纯诊断逻辑下沉到新增 `src/doctor.ts`;inspection helper 放 `src/project-index.ts`。
+- 聚合流程先收集 observations、再生成 commands check。

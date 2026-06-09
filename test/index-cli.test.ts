@@ -1,6 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
+import fsp from "node:fs/promises";
+import os from "node:os";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 
 import {
   buildLaunchArgs,
@@ -13,6 +17,32 @@ import {
   parseToolSelection,
 } from "../src/index.js";
 import { TOOL_CODEX, TOOL_CLAUDE } from "../src/project-index.js";
+
+const execFileAsync = promisify(execFile);
+
+async function runCli(args: string[], homeDir: string): Promise<{ stdout: string; stderr: string; code: number }> {
+  const cliPath = path.resolve("src/cli.ts");
+  try {
+    const { stdout, stderr } = await execFileAsync(
+      process.execPath,
+      ["--import", "tsx", cliPath, ...args],
+      { env: { ...process.env, HOME: homeDir, USERPROFILE: homeDir } }
+    );
+    return { stdout, stderr, code: 0 };
+  } catch (error) {
+    const failure = error as { stdout?: string; stderr?: string; code?: number };
+    return { stdout: failure.stdout ?? "", stderr: failure.stderr ?? "", code: typeof failure.code === "number" ? failure.code : 1 };
+  }
+}
+
+async function withTempHome(fn: (homeDir: string) => Promise<void>): Promise<void> {
+  const homeDir = await fsp.mkdtemp(path.join(os.tmpdir(), "ago-cli-home-"));
+  try {
+    await fn(homeDir);
+  } finally {
+    await fsp.rm(homeDir, { recursive: true, force: true });
+  }
+}
 
 test("normalizeArgv maps -al to --all", () => {
   const argv = ["node", "dist/cli.js", "-al"];
@@ -188,4 +218,35 @@ test("buildToolMenuChoices shows continue only for tools with a last session", (
   assert.ok(values.includes("new:codex"));
   assert.ok(!values.includes("resume:codex"));
   assert.equal(values[values.length - 1], "__back__");
+});
+
+test("ago config show on empty home prints default config JSON with formatVersion", async () => {
+  await withTempHome(async (homeDir) => {
+    const result = await runCli(["config", "show"], homeDir);
+    assert.equal(result.code, 0);
+    const parsed = JSON.parse(result.stdout);
+    assert.equal(parsed.formatVersion, "1.0");
+    assert.equal(parsed.exists, false);
+    assert.deepEqual(parsed.value, { roots: [], claudeCommand: "claude", preferredTool: "auto" });
+  });
+});
+
+test("ago config show on invalid config exits 1 with validJson false", async () => {
+  await withTempHome(async (homeDir) => {
+    const agoDir = path.join(homeDir, ".ago");
+    await fsp.mkdir(agoDir, { recursive: true });
+    await fsp.writeFile(path.join(agoDir, "config.json"), "{bad}", "utf8");
+    const result = await runCli(["config", "show"], homeDir);
+    assert.equal(result.code, 1);
+    const parsed = JSON.parse(result.stdout);
+    assert.equal(parsed.validJson, false);
+  });
+});
+
+test("bare ago config prints help and exits 0", async () => {
+  await withTempHome(async (homeDir) => {
+    const result = await runCli(["config"], homeDir);
+    assert.equal(result.code, 0);
+    assert.match(result.stdout, /show/);
+  });
 });

@@ -17,6 +17,7 @@ import {
   type AgoState,
   type ProjectIndexItem,
 } from "./project-index.js";
+import { buildConfigShowReport } from "./doctor.js";
 
 type ToolName = typeof TOOL_CODEX | typeof TOOL_CLAUDE;
 
@@ -685,6 +686,18 @@ export async function runLastLaunch(options: { commandPrompt: string }): Promise
   });
 }
 
+function readPackageMeta(): { version: string; minNodeMajor: number } {
+  try {
+    const raw = fs.readFileSync(new URL("../package.json", import.meta.url), "utf8");
+    const pkg = JSON.parse(raw) as { version?: string; engines?: { node?: string } };
+    const version = typeof pkg.version === "string" ? pkg.version : "0.0.0";
+    const match = /(\d+)/.exec(pkg.engines?.node ?? "");
+    return { version, minNodeMajor: match ? Number(match[1]) : 18 };
+  } catch {
+    return { version: "0.0.0", minNodeMajor: 18 };
+  }
+}
+
 export async function main(argv: string[] = process.argv): Promise<void> {
   const program = new Command();
 
@@ -697,6 +710,26 @@ export async function main(argv: string[] = process.argv): Promise<void> {
     .option("-l, --last", "Reopen the last launched project and CLI")
     .allowExcessArguments(false)
     .showHelpAfterError();
+
+  const configCommand = program
+    .command("config")
+    .description("Inspect ago configuration")
+    .allowExcessArguments(false);
+
+  configCommand
+    .command("show")
+    .description("Print normalized config with per-key source")
+    .action(async () => {
+      const report = await buildConfigShowReport(getDefaultConfigPath());
+      process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+      if (!report.validJson) {
+        process.exitCode = 1;
+      }
+    });
+
+  configCommand.action(() => {
+    configCommand.help();
+  });
 
   program.action(async (options: CliOptions) => {
     const commandPrompt = parseCommandPromptOption(options.command);

@@ -120,3 +120,57 @@ test("buildDoctorReport flags an outdated Node version as error", async () => {
     assert.equal(report.status, "error");
   });
 });
+
+test("buildDoctorReport catch fallback preserves partial progress before the failure", async () => {
+  await withTempDir(async (tempDir) => {
+    const agoDir = path.join(tempDir, ".ago");
+    await fs.mkdir(agoDir, { recursive: true });
+    await fs.writeFile(path.join(agoDir, "config.json"), JSON.stringify({ roots: [] }), "utf8");
+
+    const report = await buildDoctorReport({
+      ...baseInput(tempDir),
+      isCommandAvailable: () => {
+        throw new Error("boom");
+      },
+    });
+
+    assert.equal(report.status, "error");
+    assert.ok(report.checks.some((check) => check.id === "runtime.unexpected_error"));
+    assert.equal(report.config.exists, true);
+  });
+});
+
+test("buildDoctorReport warns when a configured root does not exist", async () => {
+  await withTempDir(async (tempDir) => {
+    const agoDir = path.join(tempDir, ".ago");
+    await fs.mkdir(agoDir, { recursive: true });
+    await fs.writeFile(
+      path.join(agoDir, "config.json"),
+      JSON.stringify({ roots: ["/no/such/path/zzz-doctor-test"] }),
+      "utf8"
+    );
+
+    const report = await buildDoctorReport(baseInput(tempDir));
+    const rootsCheck = report.checks.find((check) => check.id === "config.roots_exist");
+    assert.equal(rootsCheck?.status, "warning");
+  });
+});
+
+test("buildDoctorReport warns when roots filter out all observed projects", async () => {
+  await withTempDir(async (tempDir) => {
+    const claudeDir = path.join(tempDir, ".claude");
+    await fs.mkdir(claudeDir, { recursive: true });
+    await fs.writeFile(
+      path.join(claudeDir, "history.jsonl"),
+      `${JSON.stringify({ project: "/tmp/outside-root-zzz", sessionId: "s1", timestamp: 1_699_000_000_000 })}\n`,
+      "utf8"
+    );
+    const agoDir = path.join(tempDir, ".ago");
+    await fs.mkdir(agoDir, { recursive: true });
+    await fs.writeFile(path.join(agoDir, "config.json"), JSON.stringify({ roots: [tempDir] }), "utf8");
+
+    const report = await buildDoctorReport(baseInput(tempDir));
+    const filterCheck = report.checks.find((check) => check.id === "config.roots_filter_nonempty");
+    assert.equal(filterCheck?.status, "warning");
+  });
+});

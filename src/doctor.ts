@@ -141,6 +141,23 @@ export async function buildDoctorReport(input: DoctorReportInput): Promise<Docto
 
   const checks: DoctorCheck[] = [];
 
+  let configSummary: DoctorReport["config"] = {
+    exists: false,
+    validJson: true,
+    value: { roots: [], claudeCommand: "claude", preferredTool: "auto" },
+    sources: { roots: "default", claudeCommand: "default", preferredTool: "default" },
+  };
+  let stateSummary: DoctorReport["state"] = { exists: false, validJson: true, lastLaunchPathExists: false };
+  let commandsSummary: DoctorReport["commands"] = {
+    codex: { available: false, command: "codex" },
+    claude: { available: false, command: "claude" },
+  };
+  let sourcesSummary: DoctorReport["sources"] = {
+    codex: { sessionsDirExists: false, observations: 0 },
+    claude: { historyExists: false, projectsDirExists: false, observations: 0 },
+  };
+  let projectsSummary: DoctorReport["projects"] = { total: 0, existing: 0, missing: 0 };
+
   try {
     // runtime
     const nodeMajor = parseNodeMajor(input.nodeVersion);
@@ -159,6 +176,12 @@ export async function buildDoctorReport(input: DoctorReportInput): Promise<Docto
     // config
     const configInspection = await inspectConfig(paths.config);
     const config = configInspection.value;
+    configSummary = {
+      exists: configInspection.exists,
+      validJson: configInspection.validJson,
+      value: configInspection.value,
+      sources: configInspection.sources,
+    };
     checks.push(
       !configInspection.exists
         ? { id: "config.exists", category: "config", status: "warning", message: "Config file does not exist; using defaults", details: { path: paths.config } }
@@ -183,6 +206,11 @@ export async function buildDoctorReport(input: DoctorReportInput): Promise<Docto
 
     // state
     const stateInspection = await inspectState(paths.state);
+    stateSummary = {
+      exists: stateInspection.exists,
+      validJson: stateInspection.validJson,
+      lastLaunchPathExists: stateInspection.lastLaunchPathExists,
+    };
     checks.push(
       !stateInspection.exists
         ? { id: "state.exists", category: "state", status: "warning", message: "State file does not exist (new user)", details: { path: paths.state } }
@@ -215,6 +243,10 @@ export async function buildDoctorReport(input: DoctorReportInput): Promise<Docto
     const claudeCommand = config.claudeCommand;
     const codexAvailable = input.isCommandAvailable(codexCommand);
     const claudeAvailable = input.isCommandAvailable(claudeCommand);
+    commandsSummary = {
+      codex: { available: codexAvailable, command: codexCommand },
+      claude: { available: claudeAvailable, command: claudeCommand },
+    };
     checks.push(
       !codexAvailable
         ? { id: "commands.codex_available", category: "commands", status: codexObservations.length > 0 ? "error" : "warning", message: `codex command not found: ${codexCommand}`, details: { command: codexCommand, observations: codexObservations.length } }
@@ -246,6 +278,10 @@ export async function buildDoctorReport(input: DoctorReportInput): Promise<Docto
         : { id: "sources.claude_projects_dir", category: "sources", status: "ok", message: "Claude projects dir found" }
     );
     const totalObservations = codexObservations.length + claudeObservations.length;
+    sourcesSummary = {
+      codex: { sessionsDirExists: codexSessionsDirExists, observations: codexObservations.length },
+      claude: { historyExists: claudeHistoryExists, projectsDirExists: claudeProjectsDirExists, observations: claudeObservations.length },
+    };
     checks.push(
       totalObservations === 0
         ? { id: "sources.observations_nonempty", category: "sources", status: "warning", message: "No Codex or Claude observations found", details: {} }
@@ -257,6 +293,7 @@ export async function buildDoctorReport(input: DoctorReportInput): Promise<Docto
     const filtered = filterProjectsByRoots(mergedAll, config.roots, homeDir);
     const existing = filtered.filter((project) => project.exists).length;
     const missing = filtered.length - existing;
+    projectsSummary = { total: filtered.length, existing, missing };
     checks.push(
       filtered.length === 0
         ? { id: "projects.any_indexed", category: "projects", status: "warning", message: "No projects indexed", details: {} }
@@ -289,26 +326,11 @@ export async function buildDoctorReport(input: DoctorReportInput): Promise<Docto
       errorCount: aggregate.errorCount,
       warningCount: aggregate.warningCount,
       paths,
-      config: {
-        exists: configInspection.exists,
-        validJson: configInspection.validJson,
-        value: configInspection.value,
-        sources: configInspection.sources,
-      },
-      state: {
-        exists: stateInspection.exists,
-        validJson: stateInspection.validJson,
-        lastLaunchPathExists: stateInspection.lastLaunchPathExists,
-      },
-      commands: {
-        codex: { available: codexAvailable, command: codexCommand },
-        claude: { available: claudeAvailable, command: claudeCommand },
-      },
-      sources: {
-        codex: { sessionsDirExists: codexSessionsDirExists, observations: codexObservations.length },
-        claude: { historyExists: claudeHistoryExists, projectsDirExists: claudeProjectsDirExists, observations: claudeObservations.length },
-      },
-      projects: { total: filtered.length, existing, missing },
+      config: configSummary,
+      state: stateSummary,
+      commands: commandsSummary,
+      sources: sourcesSummary,
+      projects: projectsSummary,
       checks,
     };
   } catch (error) {
@@ -328,11 +350,11 @@ export async function buildDoctorReport(input: DoctorReportInput): Promise<Docto
       errorCount: aggregate.errorCount,
       warningCount: aggregate.warningCount,
       paths,
-      config: { exists: false, validJson: true, value: { roots: [], claudeCommand: "claude", preferredTool: "auto" }, sources: { roots: "default", claudeCommand: "default", preferredTool: "default" } },
-      state: { exists: false, validJson: true, lastLaunchPathExists: false },
-      commands: { codex: { available: false, command: "codex" }, claude: { available: false, command: "claude" } },
-      sources: { codex: { sessionsDirExists: false, observations: 0 }, claude: { historyExists: false, projectsDirExists: false, observations: 0 } },
-      projects: { total: 0, existing: 0, missing: 0 },
+      config: configSummary,
+      state: stateSummary,
+      commands: commandsSummary,
+      sources: sourcesSummary,
+      projects: projectsSummary,
       checks: allChecks,
     };
   }

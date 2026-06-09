@@ -893,6 +893,43 @@ export async function inspectConfig(configPath = getDefaultConfigPath()): Promis
   };
 }
 
+export interface StateInspection {
+  path: string;
+  exists: boolean;
+  validJson: boolean;
+  error?: string;
+  value: AgoState;
+  hasLastLaunch: boolean;
+  lastLaunchToolSupported: boolean;
+  lastLaunchPathExists: boolean;
+}
+
+export async function inspectState(statePath = getDefaultStatePath()): Promise<StateInspection> {
+  const file = await inspectJsonFile(statePath);
+  const raw = file.raw ?? {};
+  const value = normalizeState(raw);
+
+  const rawLastLaunch =
+    raw.lastLaunch && typeof raw.lastLaunch === "object" && !Array.isArray(raw.lastLaunch)
+      ? (raw.lastLaunch as RawJson)
+      : null;
+  const hasLastLaunch = rawLastLaunch !== null;
+  const rawTool = rawLastLaunch?.tool;
+  const lastLaunchToolSupported = rawTool === TOOL_CODEX || rawTool === TOOL_CLAUDE;
+  const lastLaunchPathExists = value.lastLaunch ? fs.existsSync(value.lastLaunch.path) : false;
+
+  return {
+    path: statePath,
+    exists: file.exists,
+    validJson: file.validJson,
+    error: file.error,
+    value,
+    hasLastLaunch,
+    lastLaunchToolSupported,
+    lastLaunchPathExists,
+  };
+}
+
 export async function loadConfig(configPath = getDefaultConfigPath()): Promise<AgoConfig> {
   const raw = await readJsonFile(configPath);
   return normalizeConfig(raw || {});

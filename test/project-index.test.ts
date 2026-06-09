@@ -16,6 +16,7 @@ import {
   getCodexSessionsDir,
   inspectConfig,
   inspectJsonFile,
+  inspectState,
   mergeProjectObservations,
   normalizeState,
   parseClaudeHistoryFile,
@@ -453,5 +454,60 @@ test("inspectConfig records present-but-invalid keys and falls back to defaults"
     assert.deepEqual(result.value, { roots: [], claudeCommand: "claude", preferredTool: "auto" });
     assert.deepEqual(result.sources, { roots: "default", claudeCommand: "default", preferredTool: "default" });
     assert.deepEqual([...result.invalidKeys].sort(), ["claudeCommand", "preferredTool", "roots"]);
+  });
+});
+
+test("inspectState on missing file returns defaults", async () => {
+  await withTempDir(async (tempDir) => {
+    const statePath = path.join(tempDir, "state.json");
+    const result = await inspectState(statePath);
+    assert.equal(result.exists, false);
+    assert.equal(result.validJson, true);
+    assert.equal(result.hasLastLaunch, false);
+    assert.equal(result.lastLaunchPathExists, false);
+    assert.equal(result.lastLaunchToolSupported, false);
+    assert.deepEqual(result.value, { lastLaunchedByPath: {} });
+  });
+});
+
+test("inspectState reports invalid JSON", async () => {
+  await withTempDir(async (tempDir) => {
+    const statePath = path.join(tempDir, "state.json");
+    await fs.writeFile(statePath, "{bad}", "utf8");
+    const result = await inspectState(statePath);
+    assert.equal(result.exists, true);
+    assert.equal(result.validJson, false);
+  });
+});
+
+test("inspectState flags a lastLaunch.path that no longer exists", async () => {
+  await withTempDir(async (tempDir) => {
+    const statePath = path.join(tempDir, "state.json");
+    const missingProject = path.join(tempDir, "gone");
+    await fs.writeFile(
+      statePath,
+      JSON.stringify({ lastLaunchedByPath: {}, lastLaunch: { path: missingProject, tool: "codex", ts: 1 } }),
+      "utf8"
+    );
+    const result = await inspectState(statePath);
+    assert.equal(result.hasLastLaunch, true);
+    assert.equal(result.lastLaunchToolSupported, true);
+    assert.equal(result.lastLaunchPathExists, false);
+    assert.ok(result.value.lastLaunch);
+  });
+});
+
+test("inspectState flags an unsupported lastLaunch.tool (dropped by normalization)", async () => {
+  await withTempDir(async (tempDir) => {
+    const statePath = path.join(tempDir, "state.json");
+    await fs.writeFile(
+      statePath,
+      JSON.stringify({ lastLaunchedByPath: {}, lastLaunch: { path: tempDir, tool: "gemini", ts: 1 } }),
+      "utf8"
+    );
+    const result = await inspectState(statePath);
+    assert.equal(result.hasLastLaunch, true);
+    assert.equal(result.lastLaunchToolSupported, false);
+    assert.equal(result.value.lastLaunch, undefined);
   });
 });

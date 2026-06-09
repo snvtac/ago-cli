@@ -17,7 +17,7 @@ import {
   type AgoState,
   type ProjectIndexItem,
 } from "./project-index.js";
-import { buildConfigShowReport } from "./doctor.js";
+import { buildConfigShowReport, buildDoctorReport } from "./doctor.js";
 
 type ToolName = typeof TOOL_CODEX | typeof TOOL_CLAUDE;
 
@@ -730,6 +730,25 @@ export async function main(argv: string[] = process.argv): Promise<void> {
   configCommand.action(() => {
     configCommand.help();
   });
+
+  program
+    .command("doctor")
+    .description("Print a JSON diagnostic report")
+    .action(async () => {
+      const meta = readPackageMeta();
+      const report = await buildDoctorReport({
+        now: Date.now(),
+        version: meta.version,
+        nodeVersion: process.version,
+        platform: process.platform,
+        minNodeMajor: meta.minNodeMajor,
+        isCommandAvailable,
+      });
+      process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+      if (report.errorCount > 0) {
+        process.exitCode = 1;
+      }
+    });
 
   program.action(async (options: CliOptions) => {
     const commandPrompt = parseCommandPromptOption(options.command);

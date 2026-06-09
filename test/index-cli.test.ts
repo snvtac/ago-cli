@@ -250,3 +250,52 @@ test("bare ago config prints help and exits 0", async () => {
     assert.match(result.stdout, /show/);
   });
 });
+
+test("ago doctor on empty home prints parseable JSON, status not error", async () => {
+  await withTempHome(async (homeDir) => {
+    const result = await runCli(["doctor"], homeDir);
+    assert.equal(result.code, 0);
+    const parsed = JSON.parse(result.stdout);
+    assert.equal(parsed.formatVersion, "1.0");
+    assert.ok(["ok", "warning"].includes(parsed.status));
+    assert.ok(Array.isArray(parsed.checks));
+    assert.equal(parsed.errorCount, 0);
+  });
+});
+
+test("ago doctor exits 1 when a Claude command is missing but observations exist", async () => {
+  await withTempHome(async (homeDir) => {
+    const claudeDir = path.join(homeDir, ".claude");
+    await fsp.mkdir(claudeDir, { recursive: true });
+    await fsp.writeFile(
+      path.join(claudeDir, "history.jsonl"),
+      `${JSON.stringify({ project: "/tmp/seen", sessionId: "s1", timestamp: 1_699_000_000_000 })}\n`,
+      "utf8"
+    );
+    const agoDir = path.join(homeDir, ".ago");
+    await fsp.mkdir(agoDir, { recursive: true });
+    await fsp.writeFile(path.join(agoDir, "config.json"), JSON.stringify({ claudeCommand: "ago-not-a-real-cmd-zzz" }), "utf8");
+
+    const result = await runCli(["doctor"], homeDir);
+    assert.equal(result.code, 1);
+    const parsed = JSON.parse(result.stdout);
+    assert.equal(parsed.status, "error");
+  });
+});
+
+test("ago --help lists the doctor and config subcommands", async () => {
+  await withTempHome(async (homeDir) => {
+    const result = await runCli(["--help"], homeDir);
+    assert.equal(result.code, 0);
+    assert.match(result.stdout, /doctor/);
+    assert.match(result.stdout, /config/);
+  });
+});
+
+test("ago -al on empty home still runs the default action", async () => {
+  await withTempHome(async (homeDir) => {
+    const result = await runCli(["-al"], homeDir);
+    assert.equal(result.code, 0);
+    assert.match(result.stdout, /No projects found/);
+  });
+});

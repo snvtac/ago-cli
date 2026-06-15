@@ -47,7 +47,7 @@ interface ProjectChoice {
 
 interface ToolSelection {
   tool: ToolName;
-  resume: boolean;
+  action: "resume" | "new" | "pick";
 }
 
 interface UiDependencies {
@@ -508,20 +508,20 @@ export function buildResumeArgs(tool: ToolName, sessionId: string): string[] {
 }
 
 export function parseToolSelection(value: string): ToolSelection | null {
-  if (value.startsWith("resume:")) {
-    const tool = value.slice("resume:".length);
-    if (tool === TOOL_CODEX || tool === TOOL_CLAUDE) {
-      return { tool, resume: true };
-    }
+  const parsed = ([
+    ["resume:", "resume"],
+    ["new:", "new"],
+    ["pick:", "pick"],
+  ] as const).find(([prefix]) => value.startsWith(prefix));
+
+  if (!parsed) {
+    return null;
   }
 
-  if (value.startsWith("new:")) {
-    const tool = value.slice("new:".length);
-    if (tool === TOOL_CODEX || tool === TOOL_CLAUDE) {
-      return { tool, resume: false };
-    }
+  const tool = value.slice(parsed[0].length);
+  if (tool === TOOL_CODEX || tool === TOOL_CLAUDE) {
+    return { tool, action: parsed[1] };
   }
-
   return null;
 }
 
@@ -659,7 +659,7 @@ export async function runInteractive(options: RunInteractiveOptions): Promise<vo
       continue;
     }
 
-    const { tool, resume } = selection;
+    const { tool, action } = selection;
     const command = resolveCommand(tool, config);
 
     if (!isCommandAvailable(command)) {
@@ -679,7 +679,7 @@ export async function runInteractive(options: RunInteractiveOptions): Promise<vo
     }
 
     let launchArgs: string[];
-    if (resume) {
+    if (action === "resume") {
       const sessionId = project.lastSessionIdByTool[tool] || "";
       launchArgs = buildResumeArgs(tool, sessionId);
       if (options.commandPrompt) {

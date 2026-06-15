@@ -220,9 +220,10 @@ test("buildResumeArgs builds codex and claude resume args", () => {
   assert.deepEqual(buildResumeArgs(TOOL_CODEX, ""), []);
 });
 
-test("parseToolSelection decodes menu values", () => {
-  assert.deepEqual(parseToolSelection("new:codex"), { tool: TOOL_CODEX, resume: false });
-  assert.deepEqual(parseToolSelection("resume:claude"), { tool: TOOL_CLAUDE, resume: true });
+test("parseToolSelection decodes menu values into actions", () => {
+  assert.deepEqual(parseToolSelection("new:codex"), { tool: TOOL_CODEX, action: "new" });
+  assert.deepEqual(parseToolSelection("resume:claude"), { tool: TOOL_CLAUDE, action: "resume" });
+  assert.deepEqual(parseToolSelection("pick:codex"), { tool: TOOL_CODEX, action: "pick" });
   assert.equal(parseToolSelection("__back__"), null);
   assert.equal(parseToolSelection("garbage"), null);
 });

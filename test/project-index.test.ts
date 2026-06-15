@@ -8,6 +8,7 @@ import {
   TOOL_CLAUDE,
   TOOL_CODEX,
   addPinnedPath,
+  buildProjectIndex,
   collectClaudeFromTranscripts,
   collectClaudeObservations,
   filterProjectsByRoots,
@@ -603,4 +604,45 @@ test("sortWithPins is a stable no-op order when no pins (and ignores unknown pin
   const sorted = sortWithPins(items, [path.resolve("/zzz-not-present")]);
   assert.deepEqual(sorted.map((i) => i.path), [path.resolve("/a"), path.resolve("/b")]);
   assert.equal(sorted[0]?.pinned, false);
+});
+
+test("buildProjectIndex annotates claudeTranscriptDir and session counts", async () => {
+  await withTempDir(async (home) => {
+    const projPath = path.join(home, "work", "demo");
+    await fs.mkdir(projPath, { recursive: true });
+
+    // Two Claude transcripts in one dir -> claude count 2, dir set.
+    const dir = path.join(home, ".claude", "projects", "-work-demo");
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(
+      path.join(dir, "s1.jsonl"),
+      `${JSON.stringify({ type: "user", cwd: projPath, sessionId: "s1", timestamp: "2026-01-01T00:00:00.000Z" })}\n`,
+      "utf8"
+    );
+    await fs.writeFile(
+      path.join(dir, "s2.jsonl"),
+      `${JSON.stringify({ type: "user", cwd: projPath, sessionId: "s2", timestamp: "2026-02-01T00:00:00.000Z" })}\n`,
+      "utf8"
+    );
+
+    // Two Codex sessions for the same path -> codex count 2.
+    const codexDir = path.join(home, ".codex", "sessions", "2026", "01");
+    await fs.mkdir(codexDir, { recursive: true });
+    await fs.writeFile(
+      path.join(codexDir, "c1.jsonl"),
+      `${JSON.stringify({ timestamp: "2026-01-01T00:00:00.000Z", payload: { id: "c1", cwd: projPath } })}\n`,
+      "utf8"
+    );
+    await fs.writeFile(
+      path.join(codexDir, "c2.jsonl"),
+      `${JSON.stringify({ timestamp: "2026-01-02T00:00:00.000Z", payload: { id: "c2", cwd: projPath } })}\n`,
+      "utf8"
+    );
+
+    const [item] = await buildProjectIndex({ homeDir: home });
+    assert.equal(item?.path, projPath);
+    assert.equal(item?.claudeTranscriptDir, dir);
+    assert.equal(item?.sessionCountByTool.claude, 2);
+    assert.equal(item?.sessionCountByTool.codex, 2);
+  });
 });

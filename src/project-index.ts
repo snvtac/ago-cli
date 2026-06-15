@@ -538,6 +538,70 @@ export async function collectClaudeFromTranscripts(homeDir = os.homedir()): Prom
   return observations;
 }
 
+export interface ClaudeDirInfo {
+  path: string;
+  dir: string;
+  sessionCount: number;
+}
+
+export async function collectClaudeProjectDirs(homeDir = os.homedir()): Promise<ClaudeDirInfo[]> {
+  const projectsDir = getClaudeProjectsDir(homeDir);
+  if (!fs.existsSync(projectsDir)) {
+    return [];
+  }
+
+  let dirEntries: fs.Dirent[] = [];
+  try {
+    dirEntries = await fsp.readdir(projectsDir, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+
+  const infos: ClaudeDirInfo[] = [];
+  for (const dirEntry of dirEntries) {
+    if (!dirEntry.isDirectory()) {
+      continue;
+    }
+    const dirPath = path.join(projectsDir, dirEntry.name);
+    let fileEntries: fs.Dirent[] = [];
+    try {
+      fileEntries = await fsp.readdir(dirPath, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+
+    const transcripts = fileEntries.filter((entry) => entry.isFile() && entry.name.endsWith(".jsonl"));
+    if (transcripts.length === 0) {
+      continue;
+    }
+
+    let newest: { path: string; mtime: number } | null = null;
+    for (const entry of transcripts) {
+      const fullPath = path.join(dirPath, entry.name);
+      let mtime = 0;
+      try {
+        mtime = (await fsp.stat(fullPath)).mtimeMs;
+      } catch {
+        continue;
+      }
+      if (!newest || mtime > newest.mtime) {
+        newest = { path: fullPath, mtime };
+      }
+    }
+    if (!newest) {
+      continue;
+    }
+
+    const observation = await parseClaudeTranscriptFile(newest.path);
+    if (!observation) {
+      continue;
+    }
+    infos.push({ path: observation.path, dir: dirPath, sessionCount: transcripts.length });
+  }
+
+  return infos;
+}
+
 export async function collectClaudeFromSessionsIndex(homeDir = os.homedir()): Promise<ProjectObservation[]> {
   const projectsDir = getClaudeProjectsDir(homeDir);
 
@@ -1074,11 +1138,21 @@ export async function buildProjectIndex({
 } = {}): Promise<ProjectIndexItem[]> {
   const normalizedConfig = normalizeConfig(config as unknown as RawJson);
 
-  const [codexObservations, claudeObservations] = await Promise.all([
+  const [codexObservations, claudeObservations, claudeDirs] = await Promise.all([
     collectCodexObservations(homeDir),
     collectClaudeObservations(homeDir),
+    collectClaudeProjectDirs(homeDir),
   ]);
 
+  const dirByPath = new Map(claudeDirs.map((info) => [info.path, info]));
   const merged = mergeProjectObservations([...codexObservations, ...claudeObservations]);
+  for (const item of merged) {
+    const info = dirByPath.get(item.path);
+    if (info) {
+      item.claudeTranscriptDir = info.dir;
+      item.sessionCountByTool.claude = info.sessionCount;
+    }
+  }
+
   return filterProjectsByRoots(merged, normalizedConfig.roots, homeDir);
 }

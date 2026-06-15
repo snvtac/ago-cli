@@ -757,6 +757,25 @@ export function normalizeConfig(rawConfig: RawJson = {}): AgoConfig {
   };
 }
 
+export function addPinnedPath(pinnedPaths: string[], inputPath: string): string[] {
+  const normalized = normalizeProjectPath(inputPath);
+  if (!normalized) {
+    return pinnedPaths;
+  }
+  if (pinnedPaths.includes(normalized)) {
+    return pinnedPaths;
+  }
+  return [...pinnedPaths, normalized];
+}
+
+export function removePinnedPath(pinnedPaths: string[], inputPath: string): string[] {
+  const normalized = normalizeProjectPath(inputPath);
+  if (!normalized) {
+    return pinnedPaths;
+  }
+  return pinnedPaths.filter((entry) => entry !== normalized);
+}
+
 export function normalizeState(rawState: RawJson = {}): AgoState {
   const out: AgoState = {
     lastLaunchedByPath: {},

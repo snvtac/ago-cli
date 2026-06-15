@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 import {
   TOOL_CLAUDE,
   TOOL_CODEX,
+  addPinnedPath,
   collectClaudeFromTranscripts,
   collectClaudeObservations,
   filterProjectsByRoots,
@@ -24,6 +25,7 @@ import {
   parseClaudeSessionsIndexFile,
   parseCodexSessionFile,
   pickDefaultTool,
+  removePinnedPath,
   resolveConfiguredRoot,
   saveState,
   toEpochMs,
@@ -548,4 +550,17 @@ test("saveState/loadState round-trip preserves pinnedPaths AND lastLaunch", asyn
     assert.equal(loaded.lastLaunch?.ts, 7);
     assert.equal(loaded.lastLaunchedByPath[path.resolve("/tmp/p")], "codex");
   });
+});
+
+test("addPinnedPath appends normalized path and is idempotent", () => {
+  const once = addPinnedPath([], "/tmp/a/");
+  assert.deepEqual(once, [path.resolve("/tmp/a")]);
+  const twice = addPinnedPath(once, "/tmp/a");
+  assert.deepEqual(twice, [path.resolve("/tmp/a")]);
+});
+
+test("removePinnedPath removes a normalized path and is a no-op when absent", () => {
+  const start = [path.resolve("/tmp/a"), path.resolve("/tmp/b")];
+  assert.deepEqual(removePinnedPath(start, "/tmp/a"), [path.resolve("/tmp/b")]);
+  assert.deepEqual(removePinnedPath(start, "/tmp/zzz"), start);
 });

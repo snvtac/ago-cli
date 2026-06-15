@@ -17,6 +17,7 @@ import {
   inspectConfig,
   inspectJsonFile,
   inspectState,
+  loadState,
   mergeProjectObservations,
   normalizeState,
   parseClaudeHistoryFile,
@@ -24,6 +25,7 @@ import {
   parseCodexSessionFile,
   pickDefaultTool,
   resolveConfiguredRoot,
+  saveState,
   toEpochMs,
 } from "../src/project-index.js";
 
@@ -466,7 +468,7 @@ test("inspectState on missing file returns defaults", async () => {
     assert.equal(result.hasLastLaunch, false);
     assert.equal(result.lastLaunchPathExists, false);
     assert.equal(result.lastLaunchToolSupported, false);
-    assert.deepEqual(result.value, { lastLaunchedByPath: {} });
+    assert.deepEqual(result.value, { lastLaunchedByPath: {}, pinnedPaths: [] });
   });
 });
 
@@ -509,5 +511,41 @@ test("inspectState flags an unsupported lastLaunch.tool (dropped by normalizatio
     assert.equal(result.hasLastLaunch, true);
     assert.equal(result.lastLaunchToolSupported, false);
     assert.equal(result.value.lastLaunch, undefined);
+  });
+});
+
+test("normalizeState defaults pinnedPaths to [] when absent", () => {
+  const state = normalizeState({ lastLaunchedByPath: {} });
+  assert.deepEqual(state.pinnedPaths, []);
+});
+
+test("normalizeState validates, normalizes, and dedupes pinnedPaths", () => {
+  const state = normalizeState({
+    lastLaunchedByPath: {},
+    pinnedPaths: ["/tmp/a", "/tmp/a", "  ", 42, "/tmp/b/"],
+  });
+  assert.deepEqual(state.pinnedPaths, [path.resolve("/tmp/a"), path.resolve("/tmp/b")]);
+});
+
+test("normalizeState drops a non-array pinnedPaths", () => {
+  const state = normalizeState({ lastLaunchedByPath: {}, pinnedPaths: "nope" });
+  assert.deepEqual(state.pinnedPaths, []);
+});
+
+test("saveState/loadState round-trip preserves pinnedPaths AND lastLaunch", async () => {
+  await withTempDir(async (tempDir) => {
+    const statePath = path.join(tempDir, "state.json");
+    await saveState(
+      {
+        lastLaunchedByPath: { [path.resolve("/tmp/p")]: "codex" },
+        lastLaunch: { path: path.resolve("/tmp/p"), tool: "codex", ts: 7 },
+        pinnedPaths: [path.resolve("/tmp/a")],
+      } as never,
+      statePath
+    );
+    const loaded = await loadState(statePath);
+    assert.deepEqual(loaded.pinnedPaths, [path.resolve("/tmp/a")]);
+    assert.equal(loaded.lastLaunch?.ts, 7);
+    assert.equal(loaded.lastLaunchedByPath[path.resolve("/tmp/p")], "codex");
   });
 });

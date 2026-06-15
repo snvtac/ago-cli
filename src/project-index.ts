@@ -25,6 +25,7 @@ export interface AgoState {
     tool: ToolName;
     ts: number;
   };
+  pinnedPaths: string[];
 }
 
 export interface ProjectObservation {
@@ -60,6 +61,7 @@ export const DEFAULT_CONFIG: Readonly<AgoConfig> = Object.freeze({
 
 export const DEFAULT_STATE: Readonly<AgoState> = Object.freeze({
   lastLaunchedByPath: {},
+  pinnedPaths: [],
 });
 
 function getAgoDir(homeDir = os.homedir()): string {
@@ -758,6 +760,7 @@ export function normalizeConfig(rawConfig: RawJson = {}): AgoConfig {
 export function normalizeState(rawState: RawJson = {}): AgoState {
   const out: AgoState = {
     lastLaunchedByPath: {},
+    pinnedPaths: [],
   };
 
   const sourceMap = rawState?.lastLaunchedByPath;
@@ -785,6 +788,21 @@ export function normalizeState(rawState: RawJson = {}): AgoState {
         tool: launchTool,
         ts: toEpochMs(candidate.ts),
       };
+    }
+  }
+
+  if (Array.isArray(rawState?.pinnedPaths)) {
+    const seen = new Set<string>();
+    for (const candidate of rawState.pinnedPaths as unknown[]) {
+      if (typeof candidate !== "string") {
+        continue;
+      }
+      const normalized = normalizeProjectPath(candidate);
+      if (!normalized || seen.has(normalized)) {
+        continue;
+      }
+      seen.add(normalized);
+      out.pinnedPaths.push(normalized);
     }
   }
 

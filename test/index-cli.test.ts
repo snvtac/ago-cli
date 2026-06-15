@@ -8,6 +8,7 @@ import { promisify } from "node:util";
 
 import {
   buildLaunchArgs,
+  buildProjectChoice,
   buildResumeArgs,
   buildToolMenuChoices,
   filterProjectsByNameQuery,
@@ -89,6 +90,23 @@ test("filterProjectsByNameQuery fuzzy matches name and path", () => {
   assert.equal(byName[0]?.name, "sample-website");
   assert.equal(byPath.length, 1);
   assert.equal(byPath[0]?.name, "ago-cli");
+});
+
+test("buildProjectChoice reserves a fixed marker column so pinned/unpinned rows align", () => {
+  const chalk = {
+    dim: (v: string) => v, cyan: (v: string) => v, blue: (v: string) => v,
+    magenta: (v: string) => v, green: (v: string) => v, red: (v: string) => v, yellow: (v: string) => v,
+  };
+  const base = { name: "demo", lastSeenAt: 0, sourceLabel: "codex", exists: true } as never;
+  const widths = { name: 16, date: 8, platform: 12, status: 7 };
+
+  const pinned = buildProjectChoice({ ...base, pinned: true }, chalk, widths, { showStatus: false });
+  const plain = buildProjectChoice({ ...base, pinned: false }, chalk, widths, { showStatus: false });
+
+  assert.ok(pinned.name.startsWith("★ "));
+  assert.ok(plain.name.startsWith("  "));
+  // Everything after the 2-char marker column is identical -> columns stay aligned.
+  assert.equal(pinned.name.slice(2), plain.name.slice(2));
 });
 
 test("getRecommendedTool uses state first", () => {

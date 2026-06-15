@@ -16,6 +16,7 @@ import {
   removePinnedPath,
   resolveConfiguredRoot,
   saveState,
+  sortWithPins,
   type AgoConfig,
   type AgoState,
   type ProjectIndexItem,
@@ -186,12 +187,17 @@ function getColumnWidths(projects: ProjectIndexItem[]) {
   };
 }
 
-function buildProjectChoice(
+function pinMarkerCell(pinned: boolean, chalk: UiDependencies["chalk"]): string {
+  return pinned ? `${chalk.yellow("★")} ` : "  ";
+}
+
+export function buildProjectChoice(
   project: ProjectIndexItem,
   chalk: UiDependencies["chalk"],
   columnWidths: ReturnType<typeof getColumnWidths>,
   options: { showStatus: boolean }
 ): ProjectChoice {
+  const marker = pinMarkerCell(project.pinned, chalk);
   const nameText = fitText(project.name, columnWidths.name);
   const dateLabel = colorizeCell(formatDateShort(project.lastSeenAt), columnWidths.date, (value) => chalk.dim(value));
   const sourceLabel = colorizeCell(toPlatformLabel(project.sourceLabel), columnWidths.platform, (value) =>
@@ -203,8 +209,8 @@ function buildProjectChoice(
 
   return {
     name: options.showStatus
-      ? `${nameText}  ${dateLabel}  ${sourceLabel}  ${existsLabel}`
-      : `${nameText}  ${dateLabel}  ${sourceLabel}`,
+      ? `${marker}${nameText}  ${dateLabel}  ${sourceLabel}  ${existsLabel}`
+      : `${marker}${nameText}  ${dateLabel}  ${sourceLabel}`,
     value: project.path,
     project,
   };
@@ -605,7 +611,8 @@ export async function runInteractive(options: RunInteractiveOptions): Promise<vo
   const state = await loadState(statePath);
 
   const allProjects = await buildProjectIndex({ config, homeDir: os.homedir() });
-  const projects = options.showAll ? allProjects : allProjects.filter((project) => project.exists);
+  const pinnedProjects = sortWithPins(allProjects, state.pinnedPaths);
+  const projects = options.showAll ? pinnedProjects : pinnedProjects.filter((project) => project.exists);
   const matchedProjects = filterProjectsByNameQuery(projects, options.nameQuery);
 
   if (projects.length === 0) {

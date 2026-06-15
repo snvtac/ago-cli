@@ -332,3 +332,56 @@ test("resolvePinTarget reports ambiguity and not-found", () => {
   const notFound = resolvePinTarget({ name: "zzz-nope", cwd: "/tmp", projects, homeDir: "/home/u" });
   assert.equal(notFound.kind, "not_found");
 });
+
+async function readPinned(homeDir: string): Promise<string[]> {
+  try {
+    const raw = await fsp.readFile(path.join(homeDir, ".ago", "state.json"), "utf8");
+    return JSON.parse(raw).pinnedPaths ?? [];
+  } catch {
+    return [];
+  }
+}
+
+test("ago pin <dir> stores the pin idempotently; ago unpin removes it", async () => {
+  await withTempHome(async (home) => {
+    const proj = path.join(home, "proj");
+    await fsp.mkdir(proj, { recursive: true });
+
+    const first = await runCli(["pin", proj], home);
+    assert.equal(first.code, 0);
+    assert.deepEqual(await readPinned(home), [path.resolve(proj)]);
+
+    await runCli(["pin", proj], home); // idempotent
+    assert.deepEqual(await readPinned(home), [path.resolve(proj)]);
+
+    const unpinned = await runCli(["unpin", proj], home);
+    assert.equal(unpinned.code, 0);
+    assert.deepEqual(await readPinned(home), []);
+  });
+});
+
+test("ago unpin a not-pinned path is a no-op exit 0", async () => {
+  await withTempHome(async (home) => {
+    const result = await runCli(["unpin", home], home);
+    assert.equal(result.code, 0);
+    assert.deepEqual(await readPinned(home), []);
+  });
+});
+
+test("ago pin with an ambiguous fuzzy name exits 1", async () => {
+  await withTempHome(async (home) => {
+    const claudeDir = path.join(home, ".claude");
+    await fsp.mkdir(claudeDir, { recursive: true });
+    await fsp.writeFile(
+      path.join(claudeDir, "history.jsonl"),
+      [
+        JSON.stringify({ project: "/tmp/shared-alpha", sessionId: "s1", timestamp: 1_699_000_000_000 }),
+        JSON.stringify({ project: "/tmp/shared-beta", sessionId: "s2", timestamp: 1_699_000_000_001 }),
+      ].join("\n") + "\n",
+      "utf8"
+    );
+    const result = await runCli(["pin", "shared"], home);
+    assert.equal(result.code, 1);
+    assert.deepEqual(await readPinned(home), []);
+  });
+});

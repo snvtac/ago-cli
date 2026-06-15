@@ -7,11 +7,13 @@ import {
   DEFAULT_CONFIG,
   TOOL_CLAUDE,
   TOOL_CODEX,
+  addPinnedPath,
   buildProjectIndex,
   getDefaultConfigPath,
   getDefaultStatePath,
   loadConfig,
   loadState,
+  removePinnedPath,
   resolveConfiguredRoot,
   saveState,
   type AgoConfig,
@@ -737,6 +739,44 @@ function readPackageMeta(): { version: string; minNodeMajor: number } {
   }
 }
 
+async function runPinCommand(action: "pin" | "unpin", name: string | undefined, homeDir: string): Promise<void> {
+  const config = await loadConfig(getDefaultConfigPath());
+  const statePath = getDefaultStatePath();
+  const state = await loadState(statePath);
+  const projects = await buildProjectIndex({ config, homeDir });
+
+  const target = resolvePinTarget({ name, cwd: process.cwd(), projects, homeDir });
+  if (target.kind === "ambiguous") {
+    console.error(`Ambiguous name "${name}". Matches:`);
+    for (const candidate of target.candidates) {
+      console.error(`  ${candidate.path}`);
+    }
+    process.exitCode = 1;
+    return;
+  }
+  if (target.kind === "not_found") {
+    console.error(`No project matched "${name}". Pass a directory path or a unique name.`);
+    process.exitCode = 1;
+    return;
+  }
+
+  if (action === "pin") {
+    state.pinnedPaths = addPinnedPath(state.pinnedPaths, target.path);
+    await saveState(state, statePath);
+    console.log(`Pinned ${target.path} (${state.pinnedPaths.length} pinned)`);
+    return;
+  }
+
+  const before = state.pinnedPaths.length;
+  state.pinnedPaths = removePinnedPath(state.pinnedPaths, target.path);
+  await saveState(state, statePath);
+  console.log(
+    state.pinnedPaths.length < before
+      ? `Unpinned ${target.path} (${state.pinnedPaths.length} pinned)`
+      : `${target.path} was not pinned (${state.pinnedPaths.length} pinned)`
+  );
+}
+
 export async function main(argv: string[] = process.argv): Promise<void> {
   const program = new Command();
 
@@ -787,6 +827,24 @@ export async function main(argv: string[] = process.argv): Promise<void> {
       if (report.errorCount > 0) {
         process.exitCode = 1;
       }
+    });
+
+  program
+    .command("pin")
+    .description("Pin a project to the top of the list")
+    .argument("[name]", "Directory path or fuzzy project name (defaults to current directory)")
+    .allowExcessArguments(false)
+    .action(async (name?: string) => {
+      await runPinCommand("pin", name, os.homedir());
+    });
+
+  program
+    .command("unpin")
+    .description("Remove a project pin")
+    .argument("[name]", "Directory path or fuzzy project name (defaults to current directory)")
+    .allowExcessArguments(false)
+    .action(async (name?: string) => {
+      await runPinCommand("unpin", name, os.homedir());
     });
 
   program.action(async (options: CliOptions) => {

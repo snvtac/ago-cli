@@ -156,6 +156,27 @@ test("buildDoctorReport warns when a configured root does not exist", async () =
   });
 });
 
+test("buildDoctorReport reports pinnedCount and warns on a missing pinned path, exit stays 0", async () => {
+  await withTempDir(async (tempDir) => {
+    const agoDir = path.join(tempDir, ".ago");
+    await fs.mkdir(agoDir, { recursive: true });
+    const missing = path.join(tempDir, "gone-pin");
+    await fs.writeFile(
+      path.join(agoDir, "state.json"),
+      JSON.stringify({ lastLaunchedByPath: {}, pinnedPaths: [missing] }),
+      "utf8"
+    );
+
+    const report = await buildDoctorReport(baseInput(tempDir));
+    assert.equal(report.state.pinnedCount, 1);
+    const check = report.checks.find((c) => c.id === "state.pinned_paths_exist");
+    assert.equal(check?.status, "warning");
+    assert.deepEqual(check?.details?.missingPinned, [missing]);
+    assert.equal(report.status, "warning");
+    assert.equal(report.errorCount, 0); // warning must not flip the exit code
+  });
+});
+
 test("buildDoctorReport warns when roots filter out all observed projects", async () => {
   await withTempDir(async (tempDir) => {
     const claudeDir = path.join(tempDir, ".claude");

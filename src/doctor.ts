@@ -114,6 +114,7 @@ export interface DoctorReport {
     exists: boolean;
     validJson: boolean;
     lastLaunchPathExists: boolean;
+    pinnedCount: number;
   };
   commands: {
     codex: { available: boolean; command: string };
@@ -147,7 +148,7 @@ export async function buildDoctorReport(input: DoctorReportInput): Promise<Docto
     value: { roots: [], claudeCommand: "claude", preferredTool: "auto" },
     sources: { roots: "default", claudeCommand: "default", preferredTool: "default" },
   };
-  let stateSummary: DoctorReport["state"] = { exists: false, validJson: true, lastLaunchPathExists: false };
+  let stateSummary: DoctorReport["state"] = { exists: false, validJson: true, lastLaunchPathExists: false, pinnedCount: 0 };
   let commandsSummary: DoctorReport["commands"] = {
     codex: { available: false, command: "codex" },
     claude: { available: false, command: "claude" },
@@ -206,10 +207,12 @@ export async function buildDoctorReport(input: DoctorReportInput): Promise<Docto
 
     // state
     const stateInspection = await inspectState(paths.state);
+    const pinnedPaths = stateInspection.value.pinnedPaths;
     stateSummary = {
       exists: stateInspection.exists,
       validJson: stateInspection.validJson,
       lastLaunchPathExists: stateInspection.lastLaunchPathExists,
+      pinnedCount: pinnedPaths.length,
     };
     checks.push(
       !stateInspection.exists
@@ -230,6 +233,12 @@ export async function buildDoctorReport(input: DoctorReportInput): Promise<Docto
       stateInspection.hasLastLaunch && !stateInspection.lastLaunchToolSupported
         ? { id: "state.last_launch_tool", category: "state", status: "warning", message: "lastLaunch.tool is no longer a supported tool", details: {} }
         : { id: "state.last_launch_tool", category: "state", status: "ok", message: "lastLaunch.tool is supported (or no last launch)" }
+    );
+    const missingPinned = pinnedPaths.filter((pinnedPath) => !fs.existsSync(pinnedPath));
+    checks.push(
+      missingPinned.length > 0
+        ? { id: "state.pinned_paths_exist", category: "state", status: "warning", message: `${missingPinned.length} pinned path(s) no longer exist`, details: { missingPinned } }
+        : { id: "state.pinned_paths_exist", category: "state", status: "ok", message: "All pinned paths exist (or none pinned)" }
     );
 
     // observations (collected before command checks)

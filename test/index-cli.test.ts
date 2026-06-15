@@ -10,6 +10,7 @@ import {
   buildLaunchArgs,
   buildProjectChoice,
   buildResumeArgs,
+  buildSessionChoices,
   buildToolMenuChoices,
   filterProjectsByNameQuery,
   getRecommendedTool,
@@ -245,6 +246,34 @@ test("buildToolMenuChoices offers a session picker when a tool has >= 2 sessions
   const project = { lastSessionIdByTool: { claude: "c1" }, sessionCountByTool: { codex: 0, claude: 3 } } as never;
   const values = buildToolMenuChoices(project, TOOL_CLAUDE, { dim: (v: string) => v }).map((c) => c.value);
   assert.ok(values.includes("pick:claude"));
+});
+
+test("buildSessionChoices renders rows, caps at the limit, and notes the remainder", () => {
+  const chalk = { dim: (v: string) => v };
+  const sessions = Array.from({ length: 32 }, (_, i) => ({
+    sessionId: `id-${i}`,
+    lastSeenAt: 1_700_000_000_000 - i * 86_400_000,
+    preview: i === 0 ? "newest work" : undefined,
+  }));
+
+  const choices = buildSessionChoices(sessions, chalk as never, { cap: 30, backValue: "__back__" });
+  // 30 sessions + 1 truncation note + 1 back = 32 entries
+  assert.equal(choices.length, 32);
+  assert.equal(choices[0]?.value, "id-0");
+  assert.match(choices[0]?.name ?? "", /newest work/);
+  const truncation = choices.find((c) => c.disabled);
+  assert.match(truncation?.name ?? "", /2 更早会话已隐藏/);
+  assert.equal(choices[choices.length - 1]?.value, "__back__");
+});
+
+test("buildSessionChoices falls back to a short id when there is no preview", () => {
+  const chalk = { dim: (v: string) => v };
+  const choices = buildSessionChoices(
+    [{ sessionId: "abcdef0123456789", lastSeenAt: 1_700_000_000_000 }],
+    chalk as never,
+    { cap: 30, backValue: "__back__" }
+  );
+  assert.match(choices[0]?.name ?? "", /abcdef01/);
 });
 
 test("ago config show on empty home prints default config JSON with formatVersion", async () => {

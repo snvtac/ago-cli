@@ -9,6 +9,7 @@ import {
   TOOL_CODEX,
   addPinnedPath,
   buildProjectIndex,
+  collectClaudeSessionsForDir,
   getDefaultConfigPath,
   getDefaultStatePath,
   loadConfig,
@@ -20,6 +21,7 @@ import {
   type AgoConfig,
   type AgoState,
   type ProjectIndexItem,
+  type SessionRef,
 } from "./project-index.js";
 import { buildConfigShowReport, buildDoctorReport } from "./doctor.js";
 
@@ -48,6 +50,7 @@ interface ProjectChoice {
 interface ToolSelection {
   tool: ToolName;
   action: "resume" | "new" | "pick";
+  sessionId?: string;
 }
 
 interface UiDependencies {
@@ -360,6 +363,60 @@ async function chooseProject(
   }
 }
 
+export function buildSessionChoices(
+  sessions: SessionRef[],
+  chalk: { dim: (value: string) => string },
+  options: { cap: number; backValue: string }
+): Array<{ name: string; value: string; disabled?: boolean }> {
+  const visible = sessions.slice(0, options.cap);
+  const choices: Array<{ name: string; value: string; disabled?: boolean }> = visible.map((session) => {
+    const date = formatDateShort(session.lastSeenAt);
+    const label = session.preview ? session.preview : session.sessionId.slice(0, 8);
+    return { name: `${date}  ${label}`, value: session.sessionId };
+  });
+
+  const hidden = sessions.length - visible.length;
+  if (hidden > 0) {
+    choices.push({ name: chalk.dim(`+${hidden} 更早会话已隐藏`), value: "__truncated__", disabled: true });
+  }
+
+  choices.push({ name: chalk.dim("← 返回"), value: options.backValue });
+  return choices;
+}
+
+async function chooseSessionForTool(
+  project: ProjectIndexItem,
+  tool: ToolName,
+  prompts: UiDependencies["prompts"],
+  chalk: UiDependencies["chalk"]
+): Promise<string | null> {
+  const sessions =
+    tool === TOOL_CODEX
+      ? project.sessionsByTool.codex
+      : project.claudeTranscriptDir
+      ? await collectClaudeSessionsForDir(project.claudeTranscriptDir)
+      : [];
+
+  if (sessions.length === 0) {
+    return null;
+  }
+
+  const choices = buildSessionChoices(sessions, chalk, { cap: 30, backValue: "__back__" });
+  try {
+    const selected = await prompts.select({
+      message: `Select a ${tool} session for ${project.name}`,
+      pageSize: 16,
+      choices,
+    });
+    return selected === "__back__" ? null : selected;
+  } catch (error) {
+    if (isPromptCancelError(error)) {
+      return null;
+    }
+    throw error;
+  }
+}
+
 export async function chooseToolForProject(
   project: ProjectIndexItem,
   recommendedTool: ToolName,
@@ -368,20 +425,35 @@ export async function chooseToolForProject(
 ): Promise<ToolSelection | null> {
   const choices = buildToolMenuChoices(project, recommendedTool, chalk);
 
-  try {
-    const selectedValue = await prompts.select({
-      message: `Choose CLI for ${project.name}\nPath: ${project.path}`,
-      pageSize: 10,
-      choices,
-    });
-
-    return parseToolSelection(selectedValue);
-  } catch (error) {
-    if (isPromptCancelError(error)) {
-      return null;
+  while (true) {
+    let selectedValue: string;
+    try {
+      selectedValue = await prompts.select({
+        message: `Choose CLI for ${project.name}\nPath: ${project.path}`,
+        pageSize: 10,
+        choices,
+      });
+    } catch (error) {
+      if (isPromptCancelError(error)) {
+        return null;
+      }
+      throw error;
     }
 
-    throw error;
+    const selection = parseToolSelection(selectedValue);
+    if (!selection) {
+      return null; // __back__ / unknown -> back to project list (unchanged)
+    }
+
+    if (selection.action !== "pick") {
+      return selection;
+    }
+
+    const sessionId = await chooseSessionForTool(project, selection.tool, prompts, chalk);
+    if (sessionId) {
+      return { tool: selection.tool, action: "pick", sessionId };
+    }
+    // picker returned -> redraw the tool menu (stay in this loop)
   }
 }
 
@@ -683,8 +755,8 @@ export async function runInteractive(options: RunInteractiveOptions): Promise<vo
     }
 
     let launchArgs: string[];
-    if (action === "resume") {
-      const sessionId = project.lastSessionIdByTool[tool] || "";
+    if (action === "resume" || action === "pick") {
+      const sessionId = action === "pick" ? selection.sessionId ?? "" : project.lastSessionIdByTool[tool] || "";
       launchArgs = buildResumeArgs(tool, sessionId);
       if (options.commandPrompt) {
         console.log(chalk.dim("Ignoring -c content when resuming a session."));

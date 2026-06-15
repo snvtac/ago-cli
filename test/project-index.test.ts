@@ -225,6 +225,26 @@ test("mergeProjectObservations records the newest sessionId per tool", () => {
   assert.equal(merged[0]?.lastSessionIdByTool.claude, "claude-1");
 });
 
+test("mergeProjectObservations builds deduped newest-first codex sessions", () => {
+  const merged = mergeProjectObservations([
+    { path: "/x", tool: TOOL_CODEX, lastSeenAt: 100, sessionId: "a" },
+    { path: "/x", tool: TOOL_CODEX, lastSeenAt: 300, sessionId: "b" },
+    { path: "/x", tool: TOOL_CODEX, lastSeenAt: 200, sessionId: "a" }, // dupe of a, higher ts (100->200)
+  ]);
+  const item = merged[0];
+  assert.deepEqual(item?.sessionsByTool.codex.map((s) => s.sessionId), ["b", "a"]);
+  assert.equal(item?.sessionsByTool.codex[0]?.lastSeenAt, 300);
+  assert.equal(item?.sessionsByTool.codex[1]?.lastSeenAt, 200);
+  assert.equal(item?.sessionCountByTool.codex, 2);
+  assert.equal(item?.pinned, false);
+});
+
+test("mergeProjectObservations leaves claude session count at 0 (filled lazily later)", () => {
+  const merged = mergeProjectObservations([{ path: "/y", tool: TOOL_CLAUDE, lastSeenAt: 1, sessionId: "c" }]);
+  assert.equal(merged[0]?.sessionCountByTool.claude, 0);
+  assert.deepEqual(merged[0]?.sessionsByTool.codex, []);
+});
+
 test("parseCodexSessionFile extracts sessionId from payload.id", async () => {
   await withTempDir(async (tempDir) => {
     const sessionPath = path.join(tempDir, "rollout.jsonl");

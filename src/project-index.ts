@@ -35,6 +35,12 @@ export interface ProjectObservation {
   sessionId?: string;
 }
 
+export interface SessionRef {
+  sessionId: string;
+  lastSeenAt: number;
+  preview?: string;
+}
+
 export interface ProjectIndexItem {
   path: string;
   name: string;
@@ -51,6 +57,10 @@ export interface ProjectIndexItem {
     codex?: string;
     claude?: string;
   };
+  pinned: boolean;
+  sessionsByTool: { codex: SessionRef[] };
+  sessionCountByTool: { codex: number; claude: number };
+  claudeTranscriptDir?: string;
 }
 
 export const DEFAULT_CONFIG: Readonly<AgoConfig> = Object.freeze({
@@ -629,6 +639,7 @@ interface MergedMapItem {
   lastSeenAtByTool: Partial<Record<ToolName, number>>;
   frecencyScore: number;
   lastSessionIdByTool: Partial<Record<ToolName, string>>;
+  codexSessions: Map<string, SessionRef>;
 }
 
 export function mergeProjectObservations(
@@ -657,6 +668,7 @@ export function mergeProjectObservations(
         lastSeenAtByTool: {},
         frecencyScore: 0,
         lastSessionIdByTool: {},
+        codexSessions: new Map(),
       };
       map.set(normalizedPath, existing);
     }
@@ -669,6 +681,13 @@ export function mergeProjectObservations(
       existing.lastSeenAtByTool[tool] = lastSeenAt;
       existing.lastSessionIdByTool[tool] = sessionId;
     }
+
+    if (tool === TOOL_CODEX && sessionId) {
+      const prev = existing.codexSessions.get(sessionId);
+      if (!prev || lastSeenAt >= prev.lastSeenAt) {
+        existing.codexSessions.set(sessionId, { sessionId, lastSeenAt });
+      }
+    }
   }
 
   return [...map.values()]
@@ -678,6 +697,9 @@ export function mergeProjectObservations(
       const sources = [...item.sources].sort() as ToolName[];
       const sourceLabel: ProjectIndexItem["sourceLabel"] =
         sources.length > 1 ? "both" : (sources[0] as ToolName);
+      const codexSessions = [...item.codexSessions.values()].sort(
+        (left, right) => right.lastSeenAt - left.lastSeenAt || left.sessionId.localeCompare(right.sessionId)
+      );
 
       return {
         path: item.path,
@@ -695,6 +717,9 @@ export function mergeProjectObservations(
           codex: item.lastSessionIdByTool[TOOL_CODEX],
           claude: item.lastSessionIdByTool[TOOL_CLAUDE],
         },
+        pinned: false,
+        sessionsByTool: { codex: codexSessions },
+        sessionCountByTool: { codex: codexSessions.length, claude: 0 },
       };
     })
     .sort((left, right) => {

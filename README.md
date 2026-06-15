@@ -17,6 +17,8 @@ It reads local history, resolves a project, then launches `codex` or `claude` in
 - Projects are ranked by frecency (frequency × recency), so daily projects stay on top.
 - `ago -` (or `ago --last`) instantly reopens the last launched project + CLI.
 - For tools with a recorded session, the CLI menu offers "continue last session" (resumes the exact session id).
+- Pin frequently-used projects with `ago pin [name]` / `ago unpin [name]`; pinned projects sort to the top with a `★` marker.
+- For tools with multiple recorded sessions, the CLI menu offers "选择历史会话…" to pick and resume a specific past session.
 
 ## Tech Stack
 
@@ -76,6 +78,22 @@ ago -al -n project
 # Open the matched project and start codex/claude with initial content
 ago -n project_name -c "请帮我查询这个 repo"
 ```
+
+### Pinning
+
+```bash
+# Pin the current directory
+ago pin
+
+# Pin by directory path or unique project name
+ago pin ~/git/my-app
+ago pin my-app
+
+# Remove a pin (matches the pinned path, even if it no longer exists on disk)
+ago unpin my-app
+```
+
+Pins are stored in `~/.ago/state.json` under `pinnedPaths`. `config.json` stays hand-edited and is never written by `ago`.
 
 ## Interactive Behavior
 
@@ -159,6 +177,8 @@ ago doctor
 ```
 
 Top-level fields include `formatVersion`, `status` (`ok`/`warning`/`error`), `errorCount`, `warningCount`, `paths` (absolute), and a `checks[]` array of `{ id, category, status, message, details? }`.
+
+The `state` block also reports `pinnedCount`, and a `state.pinned_paths_exist` check warns (without failing) when a pinned path no longer exists.
 
 ### `ago config show`
 

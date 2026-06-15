@@ -733,6 +733,14 @@ export function mergeProjectObservations(
     });
 }
 
+export function sortWithPins(items: ProjectIndexItem[], pinnedPaths: string[]): ProjectIndexItem[] {
+  const pinnedSet = new Set(pinnedPaths);
+  const marked = items.map((item) => ({ ...item, pinned: pinnedSet.has(item.path) }));
+  const pinned = marked.filter((item) => item.pinned);
+  const rest = marked.filter((item) => !item.pinned);
+  return [...pinned, ...rest];
+}
+
 function isPathUnderRoot(projectPath: string, rootPath: string): boolean {
   if (!projectPath || !rootPath) {
     return false;

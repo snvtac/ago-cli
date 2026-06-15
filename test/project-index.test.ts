@@ -28,6 +28,7 @@ import {
   removePinnedPath,
   resolveConfiguredRoot,
   saveState,
+  sortWithPins,
   toEpochMs,
 } from "../src/project-index.js";
 
@@ -583,4 +584,23 @@ test("removePinnedPath removes a normalized path and is a no-op when absent", ()
   const start = [path.resolve("/tmp/a"), path.resolve("/tmp/b")];
   assert.deepEqual(removePinnedPath(start, "/tmp/a"), [path.resolve("/tmp/b")]);
   assert.deepEqual(removePinnedPath(start, "/tmp/zzz"), start);
+});
+
+test("sortWithPins moves pinned projects first while keeping group order", () => {
+  const items = [
+    { path: path.resolve("/a"), pinned: false },
+    { path: path.resolve("/b"), pinned: false },
+    { path: path.resolve("/c"), pinned: false },
+  ] as never[];
+  const sorted = sortWithPins(items, [path.resolve("/c")]);
+  assert.deepEqual(sorted.map((i) => i.path), [path.resolve("/c"), path.resolve("/a"), path.resolve("/b")]);
+  assert.equal(sorted[0]?.pinned, true);
+  assert.equal(sorted[1]?.pinned, false);
+});
+
+test("sortWithPins is a stable no-op order when no pins (and ignores unknown pins)", () => {
+  const items = [{ path: path.resolve("/a"), pinned: false }, { path: path.resolve("/b"), pinned: false }] as never[];
+  const sorted = sortWithPins(items, [path.resolve("/zzz-not-present")]);
+  assert.deepEqual(sorted.map((i) => i.path), [path.resolve("/a"), path.resolve("/b")]);
+  assert.equal(sorted[0]?.pinned, false);
 });

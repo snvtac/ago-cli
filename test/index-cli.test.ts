@@ -229,7 +229,7 @@ test("parseToolSelection decodes menu values into actions", () => {
 });
 
 test("buildToolMenuChoices shows continue only for tools with a last session", () => {
-  const project = { lastSessionIdByTool: { claude: "c1" } } as never;
+  const project = { lastSessionIdByTool: { claude: "c1" }, sessionCountByTool: { codex: 0, claude: 1 } } as never;
   const choices = buildToolMenuChoices(project, TOOL_CLAUDE, { dim: (value: string) => value });
   const values = choices.map((choice) => choice.value);
 
@@ -237,7 +237,14 @@ test("buildToolMenuChoices shows continue only for tools with a last session", (
   assert.ok(values.includes("new:claude"));
   assert.ok(values.includes("new:codex"));
   assert.ok(!values.includes("resume:codex"));
+  assert.ok(!values.includes("pick:claude")); // only 1 session -> no picker
   assert.equal(values[values.length - 1], "__back__");
+});
+
+test("buildToolMenuChoices offers a session picker when a tool has >= 2 sessions", () => {
+  const project = { lastSessionIdByTool: { claude: "c1" }, sessionCountByTool: { codex: 0, claude: 3 } } as never;
+  const values = buildToolMenuChoices(project, TOOL_CLAUDE, { dim: (v: string) => v }).map((c) => c.value);
+  assert.ok(values.includes("pick:claude"));
 });
 
 test("ago config show on empty home prints default config JSON with formatVersion", async () => {

@@ -526,7 +526,7 @@ export function parseToolSelection(value: string): ToolSelection | null {
 }
 
 export function buildToolMenuChoices(
-  project: ProjectIndexItem,
+  project: Pick<ProjectIndexItem, "lastSessionIdByTool" | "sessionCountByTool">,
   recommendedTool: ToolName,
   chalk: { dim: (value: string) => string }
 ): Array<{ name: string; value: string }> {
@@ -544,6 +544,10 @@ export function buildToolMenuChoices(
       choices.push({ name: `${tool} — new session`, value: `new:${tool}` });
     } else {
       choices.push({ name: `${tool}${recommendedTag}`, value: `new:${tool}` });
+    }
+
+    if ((project.sessionCountByTool?.[tool] ?? 0) >= 2) {
+      choices.push({ name: `${tool} — 选择历史会话…`, value: `pick:${tool}` });
     }
   }
 

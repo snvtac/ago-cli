@@ -12,6 +12,7 @@ import {
   getDefaultStatePath,
   loadConfig,
   loadState,
+  resolveConfiguredRoot,
   saveState,
   type AgoConfig,
   type AgoState,
@@ -231,6 +232,44 @@ export function filterProjectsByNameQuery(projects: ProjectIndexItem[], query: s
   }
 
   return projects.filter((project) => projectMatchesQuery(project, normalizedQuery));
+}
+
+export type PinTarget =
+  | { kind: "resolved"; path: string }
+  | { kind: "ambiguous"; candidates: ProjectIndexItem[] }
+  | { kind: "not_found" };
+
+export function resolvePinTarget(input: {
+  name?: string;
+  cwd: string;
+  projects: ProjectIndexItem[];
+  homeDir: string;
+}): PinTarget {
+  const rawName = typeof input.name === "string" ? input.name.trim() : "";
+
+  if (!rawName) {
+    return { kind: "resolved", path: path.resolve(input.cwd) };
+  }
+
+  const asPath = resolveConfiguredRoot(rawName, input.homeDir);
+  if (asPath) {
+    try {
+      if (fs.statSync(asPath).isDirectory()) {
+        return { kind: "resolved", path: asPath };
+      }
+    } catch {
+      // not an existing directory; fall through to fuzzy match
+    }
+  }
+
+  const matches = filterProjectsByNameQuery(input.projects, rawName);
+  if (matches.length === 1) {
+    return { kind: "resolved", path: matches[0]!.path };
+  }
+  if (matches.length > 1) {
+    return { kind: "ambiguous", candidates: matches };
+  }
+  return { kind: "not_found" };
 }
 
 function filterProjectChoices(choices: ProjectChoice[], query: string): ProjectChoice[] {

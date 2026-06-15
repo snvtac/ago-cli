@@ -15,6 +15,7 @@ import {
   normalizeArgv,
   parseCommandPromptOption,
   parseToolSelection,
+  resolvePinTarget,
 } from "../src/index.js";
 import { TOOL_CODEX, TOOL_CLAUDE } from "../src/project-index.js";
 
@@ -298,4 +299,36 @@ test("ago -al on empty home still runs the default action", async () => {
     assert.equal(result.code, 0);
     assert.match(result.stdout, /No projects found/);
   });
+});
+
+test("resolvePinTarget uses cwd when name is omitted", () => {
+  const result = resolvePinTarget({ name: undefined, cwd: "/tmp/here", projects: [], homeDir: "/home/u" });
+  assert.deepEqual(result, { kind: "resolved", path: path.resolve("/tmp/here") });
+});
+
+test("resolvePinTarget resolves an existing directory before fuzzy", async () => {
+  await withTempHome(async (home) => {
+    const result = resolvePinTarget({ name: home, cwd: "/tmp/here", projects: [], homeDir: home });
+    assert.deepEqual(result, { kind: "resolved", path: path.resolve(home) });
+  });
+});
+
+test("resolvePinTarget fuzzy-matches a unique project", () => {
+  const projects = [
+    { name: "alpha", path: "/x/alpha", sourceLabel: "codex" },
+    { name: "beta", path: "/x/beta", sourceLabel: "codex" },
+  ] as never[];
+  const result = resolvePinTarget({ name: "alph", cwd: "/tmp", projects, homeDir: "/home/u" });
+  assert.deepEqual(result, { kind: "resolved", path: "/x/alpha" });
+});
+
+test("resolvePinTarget reports ambiguity and not-found", () => {
+  const projects = [
+    { name: "shared-a", path: "/x/shared-a", sourceLabel: "codex" },
+    { name: "shared-b", path: "/x/shared-b", sourceLabel: "codex" },
+  ] as never[];
+  const ambiguous = resolvePinTarget({ name: "shared", cwd: "/tmp", projects, homeDir: "/home/u" });
+  assert.equal(ambiguous.kind, "ambiguous");
+  const notFound = resolvePinTarget({ name: "zzz-nope", cwd: "/tmp", projects, homeDir: "/home/u" });
+  assert.equal(notFound.kind, "not_found");
 });

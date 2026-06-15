@@ -480,6 +480,82 @@ export async function parseClaudeTranscriptFile(filePath: string): Promise<Proje
   return null;
 }
 
+function extractClaudeUserPreview(message: unknown): string | undefined {
+  if (!message || typeof message !== "object") {
+    return undefined;
+  }
+  const content = (message as RawJson).content;
+  if (typeof content === "string") {
+    return content.replace(/\s+/g, " ").trim().slice(0, 120) || undefined;
+  }
+  if (Array.isArray(content)) {
+    for (const part of content) {
+      if (part && typeof part === "object" && typeof (part as RawJson).text === "string") {
+        return ((part as RawJson).text as string).replace(/\s+/g, " ").trim().slice(0, 120) || undefined;
+      }
+    }
+  }
+  return undefined;
+}
+
+export async function collectClaudeSessionsForDir(dir: string): Promise<SessionRef[]> {
+  let entries: fs.Dirent[] = [];
+  try {
+    entries = await fsp.readdir(dir, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+
+  const sessions: SessionRef[] = [];
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith(".jsonl")) {
+      continue;
+    }
+    const sessionId = entry.name.slice(0, -".jsonl".length);
+    if (!sessionId) {
+      continue;
+    }
+    const fullPath = path.join(dir, entry.name);
+
+    let mtime = 0;
+    try {
+      mtime = (await fsp.stat(fullPath)).mtimeMs;
+    } catch {
+      mtime = 0;
+    }
+
+    const lines = await readLeadingLines(fullPath, 50);
+    let preview: string | undefined;
+    let firstTimestamp = 0;
+    for (const line of lines) {
+      if (!line) {
+        continue;
+      }
+      let json: RawJson;
+      try {
+        json = JSON.parse(line) as RawJson;
+      } catch {
+        continue;
+      }
+      if (json.type !== "user") {
+        continue;
+      }
+      if (!firstTimestamp) {
+        firstTimestamp = toEpochMs(json.timestamp);
+      }
+      preview = extractClaudeUserPreview(json.message);
+      if (preview) {
+        break;
+      }
+    }
+
+    sessions.push({ sessionId, lastSeenAt: mtime || firstTimestamp, preview });
+  }
+
+  sessions.sort((left, right) => right.lastSeenAt - left.lastSeenAt || left.sessionId.localeCompare(right.sessionId));
+  return sessions;
+}
+
 export async function collectClaudeFromTranscripts(homeDir = os.homedir()): Promise<ProjectObservation[]> {
   const projectsDir = getClaudeProjectsDir(homeDir);
   if (!fs.existsSync(projectsDir)) {

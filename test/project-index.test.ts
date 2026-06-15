@@ -9,6 +9,7 @@ import {
   TOOL_CODEX,
   addPinnedPath,
   buildProjectIndex,
+  collectClaudeSessionsForDir,
   collectClaudeFromTranscripts,
   collectClaudeObservations,
   filterProjectsByRoots,
@@ -604,6 +605,26 @@ test("sortWithPins is a stable no-op order when no pins (and ignores unknown pin
   const sorted = sortWithPins(items, [path.resolve("/zzz-not-present")]);
   assert.deepEqual(sorted.map((i) => i.path), [path.resolve("/a"), path.resolve("/b")]);
   assert.equal(sorted[0]?.pinned, false);
+});
+
+test("collectClaudeSessionsForDir lists sessions newest-first with a first-user-message preview", async () => {
+  await withTempDir(async (dir) => {
+    await fs.writeFile(
+      path.join(dir, "older.jsonl"),
+      `${JSON.stringify({ type: "user", sessionId: "older", timestamp: "2026-01-01T00:00:00.000Z", message: { role: "user", content: "fix the older bug" } })}\n`,
+      "utf8"
+    );
+    const newer = [
+      JSON.stringify({ type: "file-history-snapshot" }),
+      JSON.stringify({ type: "user", sessionId: "newer", timestamp: "2026-02-01T00:00:00.000Z", message: { role: "user", content: [{ type: "text", text: "add the newer feature" }] } }),
+    ].join("\n");
+    await fs.writeFile(path.join(dir, "newer.jsonl"), `${newer}\n`, "utf8");
+
+    const sessions = await collectClaudeSessionsForDir(dir);
+    assert.deepEqual(sessions.map((s) => s.sessionId), ["newer", "older"]);
+    assert.equal(sessions[0]?.preview, "add the newer feature");
+    assert.equal(sessions[1]?.preview, "fix the older bug");
+  });
 });
 
 test("buildProjectIndex annotates claudeTranscriptDir and session counts", async () => {

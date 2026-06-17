@@ -480,18 +480,37 @@ export async function parseClaudeTranscriptFile(filePath: string): Promise<Proje
   return null;
 }
 
+function cleanPreviewText(raw: string): string | undefined {
+  const text = raw.replace(/\s+/g, " ").trim();
+  if (!text) {
+    return undefined;
+  }
+  const commandMatch = /<command-name>(.*?)<\/command-name>/.exec(text);
+  if (commandMatch) {
+    const command = commandMatch[1]?.trim();
+    return command ? command.slice(0, 120) : undefined;
+  }
+  if (text.startsWith("<local-command-caveat>") || text.startsWith("<local-command-stdout>")) {
+    return undefined;
+  }
+  return text.slice(0, 120);
+}
+
 function extractClaudeUserPreview(message: unknown): string | undefined {
   if (!message || typeof message !== "object") {
     return undefined;
   }
   const content = (message as RawJson).content;
   if (typeof content === "string") {
-    return content.replace(/\s+/g, " ").trim().slice(0, 120) || undefined;
+    return cleanPreviewText(content);
   }
   if (Array.isArray(content)) {
     for (const part of content) {
       if (part && typeof part === "object" && typeof (part as RawJson).text === "string") {
-        return ((part as RawJson).text as string).replace(/\s+/g, " ").trim().slice(0, 120) || undefined;
+        const cleaned = cleanPreviewText((part as RawJson).text as string);
+        if (cleaned) {
+          return cleaned;
+        }
       }
     }
   }

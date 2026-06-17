@@ -875,11 +875,13 @@ async function runPinCommand(action: "pin" | "unpin", name: string | undefined, 
     const before = state.pinnedPaths.length;
     state.pinnedPaths = removePinnedPath(state.pinnedPaths, target.path);
     await saveState(state, statePath);
-    console.log(
-      state.pinnedPaths.length < before
-        ? `Unpinned ${target.path} (${state.pinnedPaths.length} pinned)`
-        : `${target.path} was not pinned (${state.pinnedPaths.length} pinned)`
-    );
+    if (state.pinnedPaths.length < before) {
+      console.log(`Unpinned ${target.path} (${state.pinnedPaths.length} pinned)`);
+    } else {
+      // For a name that matched nothing, echo what the user typed rather than a cwd-joined path.
+      const label = target.kind === "not_pinned" ? name ?? target.path : target.path;
+      console.log(`${label} was not pinned (${state.pinnedPaths.length} pinned)`);
+    }
     return;
   }
 

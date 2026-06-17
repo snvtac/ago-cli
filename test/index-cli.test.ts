@@ -478,3 +478,12 @@ test("ago unpin removes a pin whose directory no longer exists", async () => {
     assert.deepEqual(await readPinned(home), []);
   });
 });
+
+test("ago unpin echoes the typed name (not a cwd-joined path) when nothing matches", async () => {
+  await withTempHome(async (home) => {
+    const r = await runCli(["unpin", "zzz-not-a-thing"], home);
+    assert.equal(r.code, 0);
+    assert.match(r.stdout, /^zzz-not-a-thing was not pinned/m);
+    assert.ok(!r.stdout.includes(path.resolve("zzz-not-a-thing")));
+  });
+});

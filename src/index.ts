@@ -283,6 +283,41 @@ export function resolvePinTarget(input: {
   return { kind: "not_found" };
 }
 
+export type UnpinTarget =
+  | { kind: "resolved"; path: string }
+  | { kind: "ambiguous"; candidates: string[] }
+  | { kind: "not_pinned"; path: string };
+
+export function resolveUnpinTarget(input: {
+  name?: string;
+  cwd: string;
+  pinnedPaths: string[];
+  homeDir: string;
+}): UnpinTarget {
+  const rawName = typeof input.name === "string" ? input.name.trim() : "";
+
+  if (!rawName) {
+    return { kind: "resolved", path: path.resolve(input.cwd) };
+  }
+
+  // unpin matches the stored pinnedPaths directly so a pin whose directory is
+  // gone (or rolled off the history index) is still removable.
+  const asPath = resolveConfiguredRoot(rawName, input.homeDir);
+  if (asPath && input.pinnedPaths.includes(asPath)) {
+    return { kind: "resolved", path: asPath };
+  }
+
+  const needle = rawName.toLowerCase();
+  const matches = input.pinnedPaths.filter((pinned) => pinned.toLowerCase().includes(needle));
+  if (matches.length === 1) {
+    return { kind: "resolved", path: matches[0]! };
+  }
+  if (matches.length > 1) {
+    return { kind: "ambiguous", candidates: matches };
+  }
+  return { kind: "not_pinned", path: asPath || path.resolve(input.cwd, rawName) };
+}
+
 function filterProjectChoices(choices: ProjectChoice[], query: string): ProjectChoice[] {
   const normalizedQuery = normalizeQuery(query);
 
@@ -823,11 +858,33 @@ function readPackageMeta(): { version: string; minNodeMajor: number } {
 }
 
 async function runPinCommand(action: "pin" | "unpin", name: string | undefined, homeDir: string): Promise<void> {
-  const config = await loadConfig(getDefaultConfigPath());
   const statePath = getDefaultStatePath();
   const state = await loadState(statePath);
-  const projects = await buildProjectIndex({ config, homeDir });
 
+  if (action === "unpin") {
+    const target = resolveUnpinTarget({ name, cwd: process.cwd(), pinnedPaths: state.pinnedPaths, homeDir });
+    if (target.kind === "ambiguous") {
+      console.error(`Ambiguous name "${name}". Pinned matches:`);
+      for (const candidate of target.candidates) {
+        console.error(`  ${candidate}`);
+      }
+      process.exitCode = 1;
+      return;
+    }
+
+    const before = state.pinnedPaths.length;
+    state.pinnedPaths = removePinnedPath(state.pinnedPaths, target.path);
+    await saveState(state, statePath);
+    console.log(
+      state.pinnedPaths.length < before
+        ? `Unpinned ${target.path} (${state.pinnedPaths.length} pinned)`
+        : `${target.path} was not pinned (${state.pinnedPaths.length} pinned)`
+    );
+    return;
+  }
+
+  const config = await loadConfig(getDefaultConfigPath());
+  const projects = await buildProjectIndex({ config, homeDir });
   const target = resolvePinTarget({ name, cwd: process.cwd(), projects, homeDir });
   if (target.kind === "ambiguous") {
     console.error(`Ambiguous name "${name}". Matches:`);
@@ -843,21 +900,9 @@ async function runPinCommand(action: "pin" | "unpin", name: string | undefined, 
     return;
   }
 
-  if (action === "pin") {
-    state.pinnedPaths = addPinnedPath(state.pinnedPaths, target.path);
-    await saveState(state, statePath);
-    console.log(`Pinned ${target.path} (${state.pinnedPaths.length} pinned)`);
-    return;
-  }
-
-  const before = state.pinnedPaths.length;
-  state.pinnedPaths = removePinnedPath(state.pinnedPaths, target.path);
+  state.pinnedPaths = addPinnedPath(state.pinnedPaths, target.path);
   await saveState(state, statePath);
-  console.log(
-    state.pinnedPaths.length < before
-      ? `Unpinned ${target.path} (${state.pinnedPaths.length} pinned)`
-      : `${target.path} was not pinned (${state.pinnedPaths.length} pinned)`
-  );
+  console.log(`Pinned ${target.path} (${state.pinnedPaths.length} pinned)`);
 }
 
 export async function main(argv: string[] = process.argv): Promise<void> {

@@ -18,6 +18,7 @@ import {
   parseCommandPromptOption,
   parseToolSelection,
   resolvePinTarget,
+  resolveUnpinTarget,
 } from "../src/index.js";
 import { TOOL_CODEX, TOOL_CLAUDE } from "../src/project-index.js";
 
@@ -437,6 +438,43 @@ test("ago pin with an ambiguous fuzzy name exits 1", async () => {
     );
     const result = await runCli(["pin", "shared"], home);
     assert.equal(result.code, 1);
+    assert.deepEqual(await readPinned(home), []);
+  });
+});
+
+test("resolveUnpinTarget removes by exact path even if the dir is gone", () => {
+  const pins = [path.resolve("/tmp/gone-xyz")];
+  const r = resolveUnpinTarget({ name: "/tmp/gone-xyz", cwd: "/tmp", pinnedPaths: pins, homeDir: "/home/u" });
+  assert.deepEqual(r, { kind: "resolved", path: path.resolve("/tmp/gone-xyz") });
+});
+
+test("resolveUnpinTarget matches a unique substring within pinnedPaths", () => {
+  const pins = [path.resolve("/tmp/alpha-proj"), path.resolve("/tmp/beta-proj")];
+  const r = resolveUnpinTarget({ name: "alpha", cwd: "/tmp", pinnedPaths: pins, homeDir: "/home/u" });
+  assert.deepEqual(r, { kind: "resolved", path: path.resolve("/tmp/alpha-proj") });
+});
+
+test("resolveUnpinTarget reports ambiguity and not_pinned", () => {
+  const pins = [path.resolve("/tmp/shared-a"), path.resolve("/tmp/shared-b")];
+  assert.equal(resolveUnpinTarget({ name: "shared", cwd: "/tmp", pinnedPaths: pins, homeDir: "/home/u" }).kind, "ambiguous");
+  assert.equal(resolveUnpinTarget({ name: "nope", cwd: "/tmp", pinnedPaths: pins, homeDir: "/home/u" }).kind, "not_pinned");
+});
+
+test("resolveUnpinTarget with no name uses cwd", () => {
+  const r = resolveUnpinTarget({ name: undefined, cwd: "/tmp/here", pinnedPaths: [], homeDir: "/home/u" });
+  assert.deepEqual(r, { kind: "resolved", path: path.resolve("/tmp/here") });
+});
+
+test("ago unpin removes a pin whose directory no longer exists", async () => {
+  await withTempHome(async (home) => {
+    const proj = path.join(home, "ephemeral");
+    await fsp.mkdir(proj, { recursive: true });
+    await runCli(["pin", proj], home);
+    assert.deepEqual(await readPinned(home), [path.resolve(proj)]);
+
+    await fsp.rm(proj, { recursive: true, force: true }); // dir gone, absent from all history
+    const r = await runCli(["unpin", proj], home);
+    assert.equal(r.code, 0);
     assert.deepEqual(await readPinned(home), []);
   });
 });
